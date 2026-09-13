@@ -122,4 +122,83 @@ If you use Wildtrace in academic work, please cite:
   Immersive Engagement: Building the "Wildtrace" Sound World with AI Assistance. In: Proceedings of the 8th International Csound Conference (ICSC 2026), Trapani, Sicily.
 引用
 如您在学术工作中使用 Wildtrace，请引用：
+  置身世内——在AI辅助下构建声音世界的"野痕". 第 8 届国际 Csound 会议（ICSC 2026）论文集, 特拉帕尼, 西西里.4. 在 Cabbage 菜单栏选择 File → Export Plugin，编译为对应平台的原生插件格式（AU / VST / VST3）。
+5. 手动放置 GUI 资源：编译完成后，右键插件选择「显示包内容」（macOS），将同目录下的图片、字体等资源文件放入插件包对应路径，确保自定义皮肤正常渲染。
+Included Algorithms
+Wildtrace comprises eight plugins, each driven by a distinct spatial imaging algorithm:
+      Plugin
+      Core Algorithm
+      Sonic Character
+      STASIS (立定)
+      Manual positioning baseline — mouse, numeric entry and host automation as three parallel inputs
+      The reference prototype with no algorithmic intervention, establishing the motion-driven imaging paradigm
+      ORBITA (旋星)
+      Continuous circular / elliptical orbit switching (Shape); angular velocity varies naturally over the elliptical segments
+      Slight Doppler from front–back displacement, producing a sense of distance
+      SINGULARITY (奇点)
+      Bidirectional spiral trajectory plus a built-in doppler opcode
+      Black-hole contraction and white-hole ejection create depth; the core is the reversely introduced built-in Doppler
+      ZEPHYR (沐风)
+      LFO combined with data jitter driving a back-and-forth traversal
+      Each traversal is one grain envelope; fast traversal forms a grain stream
+      LÉVY-CHASE (驰猎)
+      Lévy flight with a power-law heavy-tailed step-length distribution
+      Long-tailed jumps with smooth gliding, producing intermittent Doppler
+      LOOM (针织)
+      Row × column lattice weaving motion with serpentine (boustrophedon) traversal
+      Each pass scatters the sound into N fixed-position grains
+      SWARM-GRAIN (迸粒)
+      McCurdy delay-based grain scheduling with normal-distribution spatial filtering
+      Grains fall into a circular field, forming a centre-to-edge particle cloud
+      BOIDS (群游)
+      Boids flocking algorithm (separation / alignment / cohesion)
+      Followers track the leader; Doppler drift forms a natural chorus
+内置算法
+Wildtrace 共 8 款插件，每款由一套独立的空间声像算法驱动：
+      插件
+      核心算法
+      音效本质
+      STASIS（立定）
+      手工摆位基准——鼠标、输入框、宿主自动化三路输入
+      无算法介入的对照原型，确立运动驱动声像的基础范式
+      ORBITA（旋星）
+      圆周/椭圆轨道连续切换（Shape），椭圆段角速度自然起伏
+      前后位移引起轻微多普勒，产生距离远近感
+      SINGULARITY（奇点）
+      双向螺旋轨迹 + 内置 doppler 算子
+      黑洞收缩、白洞发散形成距离感，核心为反向引入的内置多普勒
+      ZEPHYR（沐风）
+      LFO + 数据抖动驱动的往复穿越
+      每次穿越即一个粒子包络，高速穿越形成粒子流
+      LÉVY-CHASE（驰猎）
+      莱维飞行，幂函数长尾步长分布
+      长尾突变跳跃 + 平滑滑行，间歇性多普勒
+      LOOM（针织）
+      行×列点阵纺织运动，蛇形往复巡行
+      每次巡行将声音打散为 N 个固定点位粒子
+      SWARM-GRAIN（迸粒）
+      McCurdy 延迟颗粒调度 + 正态分布空间滤波
+      颗粒落入圆域，形成中心—边缘明暗粒子云
+      BOIDS（群游）
+      鸟群 Boids 算法（分离/对齐/聚合三规则）
+      从鸟追踪头鸟，多普勒漂移形成自然合唱
+Usage Notes
+- The quadraphonic version requires a 4-channel audio interface and a matching monitoring environment; configure a 4.0 channel bus in your DAW.
+- It is recommended to use the beta version in hosts that support multi-channel plugins, such as Ableton Live and Max/MSP.
+- CPU load rises with higher particle counts. Adjust the particle-number parameter to balance performance and effect.
+使用说明
+- 四声道版本需要 4 声道音频接口与对应监听环境，DAW 中需设置 4.0 声道总线。
+- 建议在 Ableton Live、Max/MSP 等支持多声道插件的宿主中使用 beta 版本。
+- 高粒子数量下 CPU 占用会升高，可通过调整粒子数参数平衡性能与效果。
+License
+Released under the MIT License. You are free to use, modify and distribute the code and derivative works — you only need to retain the original copyright notice.
+See the LICENSE file for details.
+开源协议
+本项目基于 MIT License 开源，你可以自由使用、修改、分发本项目的代码与衍生作品，仅需保留原作者版权声明。
+详见 LICENSE 文件。
+Citation
+If you use Wildtrace in academic work, please cite:
+  Immersive Engagement: Building the "Wildtrace" Sound World with AI Assistance. In: Proceedings of the 8th International Csound Conference (ICSC 2026), Trapani, Sicily.
+引用
+如您在学术工作中使用 Wildtrace，请引用：
   置身世内——在AI辅助下构建声音世界的"野痕". 第 8 届国际 Csound 会议（ICSC 2026）论文集, 特拉帕尼, 西西里.

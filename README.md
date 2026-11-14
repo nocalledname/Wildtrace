@@ -109,6 +109,34 @@ kill <PID>                                                               # macOS
 On Windows / Linux, use the extension's export command and then copy the runtime folder
 manually — the deploy step is the part that is easy to get wrong.
 
+### Hosts and multichannel
+
+The quadraphonic / ambisonic builds are 4 in / 4 out; the depth and HRTF builds are stereo.
+Verified so far (2026-11):
+
+| Host | Format | Notes |
+| --- | --- | --- |
+| Ableton Live 12 | AU | set the track output to 4.0 |
+| **Max 9** | AU | use **`mcs.vst~ 4 4`** — plain `vst~` hosts stereo only |
+
+Minimal Max 9 patch:
+
+```
+4 sources → mc.pack~ 4 → mcs.vst~ 4 4 → mc.unpack~ 4 → dac~ 1 2 3 4
+```
+
+- The first two arguments are **input / output channel counts** and must be written as `4 4`.
+  Loading the plug-in in stereo first and editing the arguments afterwards does not renegotiate
+  the format.
+- Load the plug-in with a `plug` message, or as the third argument:
+  `mcs.vst~ 4 4 Cab3-Quad-Stasis` — the AU's *display* name, **without** `.component`
+  (quote it if the name contains spaces).
+- Double-clicking the object opens the plug-in's own window (the custom UI), not a parameter panel.
+- If the plug-in is missing, rescan AU plug-ins inside Max first.
+- Logic / Cubase / Reaper are untested.
+
+A ready-to-open patch is in [`examples/max/`](./examples/max/).
+
 ### Documentation
 
 | Document | What it covers |
@@ -177,6 +205,7 @@ Wildtrace/
 ├── ambi wildtrace/        # Ambisonics 9 台
 ├── shared/gesture/        # 手势资源唯一副本（MediaPipe，16.8 MB）
 ├── scripts/               # 仓库级脚本：gesture-assets.py 分发手势资源
+├── examples/max/          # Max 9 四声道宿主示例（mcs.vst~ 4 4）
 └── paper/                 # 两篇论文 PDF（ICSC 2026 / CSMT 2026）
 ```
 
@@ -457,13 +486,30 @@ python3 scripts/gesture-assets.py --clean    # 用完删掉副本
 | [`QUICKSTART.md`](./QUICKSTART.md) | **零基础上手（20 分钟）**：装 VS Code / Csound 7 / Cabbage 3 → 看到界面 → 编译进 DAW，含 VS Code 基本操作与排错 |
 | [`paper/`](./paper/) | 两篇论文的 PDF：ICSC 2026 短论文（英文 4 页）+ CSMT 2026 长论文（中文 42 页） |
 | [`Cabbage3-改造模板.md`](./Cabbage3-改造模板.md) | **开发手册**。§A 上手准备 / §0–§1 架构与目录 / §2–§5 后端与前端骨架 / §6 视觉规范 / §7 自检 / §8 导出 / §9 已知坑 / §10 迁移顺序 / §11 热更新 / §12 参数契约 / §14 四声道 / §15 验收 / §16 距离场辅助线 / §17 头部图标 / §18 增益结构 |
+| [`examples/max/`](./examples/max/) | Max 9 四声道宿主示例 patch 与 `mcs.vst~` / `vst~` 的区别 |
 | [`quad Doppler/tools/README.md`](./quad%20Doppler/tools/README.md) | `auprobe` / `aurender` 的构建与判据，四声道 `auval` 为什么必然失败 |
 | [`stereo wildtrace/摄像头手势模块.md`](./stereo%20wildtrace/摄像头手势模块.md) | 手势模块的映射规则、生命周期、接入方式 |
 
 ### 使用建议
 
-- 四声道版需要 4 声道音频接口，并在宿主里配 4.0 总线；建议在 Ableton Live、Max/MSP 这类
-  支持多声道插件的宿主里使用。
+- 四声道版需要 4 声道音频接口，并在宿主里配 4.0 总线。**已验证的宿主（2026-11）**：
+  Ableton Live 12（AU，轨道输出配 4.0）、**Max 9（AU，必须用 `mcs.vst~ 4 4`，
+  普通 `vst~` 只有立体声）**；Logic / Cubase / Reaper 未测试。
+
+  Max 里的最小接法：
+
+  ```
+  4 路信号 → mc.pack~ 4 → mcs.vst~ 4 4 → mc.unpack~ 4 → dac~ 1 2 3 4
+  ```
+
+  - 前两个参数是**输入/输出声道数**，必须写 `4 4`；先按立体声装载再改参数，
+    不会重新协商声道格式。
+  - 装载插件用 `plug` 消息，或直接写第 3 个参数：`mcs.vst~ 4 4 Cab3-Quad-Stasis`
+    （AU 的**显示名**，不带 `.component`；名字有空格要加引号）。
+  - 双击对象打开的是**插件自己的窗口**（自定义界面），不是参数面板。
+  - 列表里找不到插件时，先在 Max 里重扫一遍 AU。
+
+  可直接打开的示例 patch：[`examples/max/mcs-vst-4ch.maxpat`](./examples/max/mcs-vst-4ch.maxpat)。
 - 高粒子 / 高密度参数会升高 CPU。参考实测（Apple M2，620×760 @ 60 fps）：
   Boids 前端 15.6% + 后端 3.1%（单核）。
 - 界面支持缩放：右下角三角拖动，双击复位；旋钮单击可输入数值，双击归位。缩放到 60–80% 时

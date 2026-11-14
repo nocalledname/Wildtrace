@@ -4838,6 +4838,17 @@ CSD 层面无解（`channelConfig` 怎么写都绕不过这段代码）。
    ```
 2. 立体声（`stereo wildtrace/` 9 台）是 **2 in / 2 out**，VST3 正常，**照旧导出**。
 3. 验收只认 AU：`verify_quad.py` 判四声道，`auval` 只看"CSD 读到了 + Csound 编译 done"。
+
+**四声道 AU 已验证的宿主（2026-11-14 实测）**：
+
+| 宿主 | 接法 | 结果 |
+|---|---|---|
+| Ableton Live 12 | AU，轨道输出配 4.0 | ✅ |
+| **Max 9** | AU，**`mcs.vst~ 4 4`** | ✅ 四路独立（用 `vst~` 只有 2 路） |
+
+> Max 的两个宿主对象容易混：`vst~` 是**只有立体声**的老对象，`mcs.vst~` 才是
+> 单实例多声道 I/O（Max 9 起提供），前两个参数即输入/输出声道数。示例 patch 见
+> `examples/max/mcs-vst-4ch.maxpat`。这条经验也写进了 README「使用建议」。
    **VST3 不进验收清单**，谁也不用为它写测试。
 
 > 已经装进 `~/Library/Audio/Plug-Ins/VST3/` 的那 9 个四声道 VST3 留着不删：

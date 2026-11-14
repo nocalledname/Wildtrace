@@ -235,6 +235,21 @@ python3 tools/export_plugin.py "Quad-Stasis Cabbage3" --no-install --no-vst3
 >
 > 然后重启 DAW。
 
+#### 用 Max 的看这里
+
+Max 里**不要用普通的 `vst~`** —— 它只有立体声，四声道插件会被压成 2 路。要用 **`mcs.vst~`**（Max 9 起提供）：
+
+```
+4 路信号 → mc.pack~ 4 → mcs.vst~ 4 4 → mc.unpack~ 4 → dac~ 1 2 3 4
+```
+
+- 前两个参数是**输入/输出声道数**，必须写 `4 4`。
+- 第 3 个参数写 AU 的**显示名**（不带 `.component`）：`mcs.vst~ 4 4 Cab3-Quad-Stasis`。
+- 双击对象打开的是插件自己的界面。
+- Max 菜单 **Options → Audio Status** 里把输出声道数设成 4。
+
+示例 patch：[`examples/max/mcs-vst-4ch.maxpat`](./examples/max/mcs-vst-4ch.maxpat)（打开即可用）。
+
 ### 6.4 Windows / Linux 怎么办
 
 上面的脚本是 macOS 专用的（用了 AU、`codesign`）。Windows / Linux 请：
@@ -278,6 +293,7 @@ python3 tools/export_plugin.py "Quad-Stasis Cabbage3" --no-install --no-vst3
 | 拧一个旋钮动了另一个参数 | `PARAM_IDX` 顺序和 `.csd` 里的参数顺序不一致 |
 | 四声道插件 `auval` 报 FAIL | 正常现象，不影响在 DAW 里使用；判定方法见 `quad Doppler/tools/README.md` |
 | 四声道 VST3 打不开 | Cabbage 3 的 VST3 不支持多总线，四声道只交付 AU |
+| Max 里只有 2 路出声 | 用了 `vst~`。改用 `mcs.vst~ 4 4`（需 Max 9+），见 6.3 |
 
 ### 还是不行
 

@@ -1,0 +1,1673 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Cab3-HRTF-Singularity</title>
+<style>
+    :root {
+        --bg: #03040a;
+        --gold: #ffc95c;
+        --gold-dim: rgba(255, 201, 92, .58);
+        --amber: #ff9a24;
+        --red: #ff3d24;
+        --fg: #eef1ff;
+        --dim: rgba(238, 241, 255, .40);
+        --mono: "SF Mono", ui-monospace, "JetBrains Mono", Menlo, Consolas, monospace;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    html, body { width: 100%; height: 100%; overflow: hidden; background: var(--bg); }
+
+    body {
+        --zoom: 1;
+        display: flex; align-items: center; justify-content: center;
+        position: relative;
+        -webkit-user-select: none; user-select: none;
+    }
+
+    .canvas {
+        width: 620px; height: 700px;
+        flex: none;
+        position: relative;
+        transform: scale(var(--zoom));
+        transform-origin: center center;
+        overflow: hidden;
+        color: var(--fg);
+        font-family: -apple-system, "Helvetica Neue", "PingFang SC", Arial, sans-serif;
+        background: #02030a;
+    }
+
+    /* ================= 上方：黑洞场景 ================= */
+    #scene {
+        position: absolute; left: 0; top: 0;
+        width: 620px; height: 440px;
+        display: block;
+    }
+    /* 声源卫星。颜色由 applyModeLook() 按黑/白洞切换，这里只是默认值。
+       机体 3.5×2.4、翼展 9.4 —— 在 620 宽的场景里刚好"看得清但不抢戏"，
+       再大就会盖住光子环。 */
+    #sat .sat-body { fill: #fffdf6; }
+    #sat .sat-core { fill: #ffffff; }
+    #sat .sat-wing { fill: rgba(255, 224, 150, .82); }
+    #sat .sat-strut { stroke: rgba(255, 224, 150, .7); stroke-width: .7; stroke-linecap: round; }
+    /* 机身后面压一层暗影：卫星会经过吸积盘最亮的那一段，
+       没有暗影就整个糊进光带里看不见了。 */
+    #sat .sat-shadow { fill: #02030a; opacity: .38; filter: url(#blur4); }
+
+    /* ★ 黑白洞换色必须用 class + CSS。
+       直接 setAttribute('fill', ...) 是 presentation attribute，
+       优先级低于任何 CSS 规则，会被上面那几条吃掉（实测：切到白洞翼还是金色）。 */
+    /* 拖尾 = 一条平滑路径 + 一层同路径的柔光。粗细固定，用渐变做"尾淡头亮"。 */
+
+    #sat.wh .sat-body { fill: #ffffff; }
+    #sat.wh .sat-wing { fill: rgba(226, 240, 255, .86); }
+    #sat.wh .sat-strut { stroke: rgba(226, 240, 255, .74); }
+
+    .star { animation: twinkle 6s ease-in-out infinite; }
+    @keyframes twinkle { 0%, 100% { opacity: .18 } 50% { opacity: .78 } }
+
+    /* 顶端标题 */
+    .hdr {
+        position: absolute; left: 20px; top: 14px; right: 20px;
+        display: flex; align-items: center; gap: 9px;
+        z-index: 4; pointer-events: none;
+    }
+    .hdr .dot {
+        width: 8px; height: 8px; border-radius: 50%;
+        border: 1.4px solid var(--red);
+        box-shadow: 0 0 9px rgba(255, 61, 36, .8), inset 0 0 4px rgba(255, 61, 36, .8);
+        flex: none;
+    }
+    .hdr h1 {
+        font-family: var(--mono); font-size: 11px; font-weight: 500;
+        letter-spacing: .34em; color: var(--fg);
+    }
+    .hdr .sub {
+        font-family: var(--mono); font-size: 7px; letter-spacing: .24em;
+        color: var(--gold-dim); text-transform: uppercase;
+    }
+    .hdr .tag {
+        margin-left: auto;
+        font-family: var(--mono); font-size: 7px; letter-spacing: .24em;
+        color: rgba(238, 241, 255, .28); text-transform: uppercase;
+    }
+
+    /* 左右电平表：贴在场景最边缘 */
+    /* ===== 电平表：表柱 + dB 标尺（与 Stasis 完全同一套实现，见模板 §6.15） =====
+       电平按 dB 映射：0 dB 在顶、-60 dB 在底。标尺刻度由 JS 按 dB 位置生成。
+       L 表：柱在内、刻度在外；R 表镜像（刻度在内、柱在外）。 */
+    .metercol {
+        position: absolute; top: 46px;
+        width: 40px;
+        display: flex; flex-direction: column; gap: 5px;
+        z-index: 3;
+    }
+    .metercol.l { left: 5px; }
+    .metercol.r { right: 5px; }
+    .metercol .lb {
+        height: 9px; line-height: 9px;
+        font-family: var(--mono); font-size: 6.5px; letter-spacing: .1em;
+        color: rgba(255, 201, 92, .42); text-align: center;
+    }
+
+    .meterbody { display: flex; align-items: stretch; gap: 3px; }
+    .meterbody.mirror { flex-direction: row-reverse; }
+
+    .bar { position: relative; width: 10px; height: 372px; flex: none; }
+    .bar::before, .bar::after {
+        content: ""; position: absolute; top: 0; bottom: 0; width: 1px;
+        background: rgba(255, 201, 92, .13);
+    }
+    .bar::before { left: 0; }
+    .bar::after { right: 0; }
+
+    .bar i {
+        position: absolute; left: 1px; right: 1px; bottom: 0;
+        height: 100%;
+        transform-origin: bottom center;
+        transform: scaleY(0);
+        background: linear-gradient(to top,
+            rgba(120, 16, 2, .9) 0%,
+            rgba(255, 61, 36, .85) 20%,
+            rgba(255, 154, 36, .78) 58%,
+            rgba(255, 201, 92, .92) 100%);
+        transition: transform .05s linear;
+        will-change: transform;
+    }
+    /* 峰值亮帽 */
+    .bar b {
+        position: absolute; left: 0; right: 0; height: 1px; bottom: 0;
+        background: rgba(255, 255, 255, .9);
+        transform: translateY(0);
+        transition: transform .05s linear, opacity .12s linear;
+        opacity: 0;
+        will-change: transform;
+    }
+
+    .dbscale { position: relative; width: 27px; height: 372px; flex: none; }
+    .dbscale .t { position: absolute; left: 0; right: 0; height: 0; }
+    .dbscale .t::before {
+        content: ""; position: absolute; left: 0; top: 0;
+        width: 3px; height: 1px;
+        background: rgba(255, 201, 92, .34);
+    }
+    .dbscale .t.major::before { width: 5px; background: rgba(255, 201, 92, .62); }
+    .dbscale .t .n {
+        position: absolute; right: 0; top: -3.4px;
+        font-family: var(--mono); font-size: 7px; line-height: 1;
+        letter-spacing: .01em;
+        color: rgba(255, 201, 92, .44);
+    }
+    .dbscale .t.major .n { color: rgba(255, 201, 92, .66); }
+    .dbscale .t.zero .n { color: rgba(255, 236, 190, .82); }
+
+    /* 右表镜像：刻度贴外侧，数字靠内 */
+    .meterbody.mirror .dbscale .t::before { left: auto; right: 0; }
+    .meterbody.mirror .dbscale .t .n { right: auto; left: 0; }
+
+    /* ================= 下方：控制区 ================= */
+    .deck {
+        position: absolute; left: 0; right: 0; bottom: 0;
+        height: 260px;
+        padding: 10px 48px 12px 20px;
+        display: flex; flex-direction: column;
+        gap: 7px;
+        background:
+            linear-gradient(to bottom, rgba(2, 3, 10, 0) 0%, rgba(2, 3, 10, .72) 14%, #02030a 46%),
+            #02030a;
+        border-top: 1px solid rgba(255, 201, 92, .13);
+        z-index: 6;
+    }
+
+    .krow { display: flex; justify-content: space-between; align-items: flex-start; }
+    .krow.a { margin-top: 4px; }
+
+    /* 旋钮 */
+    .knob {
+        position: relative;
+        width: 74px;
+        display: flex; flex-direction: column; align-items: center;
+        cursor: ns-resize;
+        touch-action: none;
+        padding-top: 1px;
+    }
+    .knob svg { width: 50px; height: 50px; display: block; overflow: visible; }
+    .knob .body {
+        fill: rgba(3, 5, 12, .95);
+        stroke: rgba(255, 201, 92, .30);
+        stroke-width: 1;
+        transition: stroke .16s ease;
+    }
+    .knob .halo { fill: none; stroke: rgba(255, 154, 36, .12); stroke-width: 4; }
+    .knob .gauge {
+        fill: none; stroke: rgba(238, 241, 255, .11); stroke-width: 2.4;
+        stroke-linecap: round; stroke-dasharray: 101.3 135.1;
+    }
+    .knob .arc {
+        fill: none; stroke: var(--gold); stroke-width: 2.4; stroke-linecap: round;
+        filter: drop-shadow(0 0 4px rgba(255, 201, 92, .9));
+    }
+    .knob .tick { stroke: rgba(238, 241, 255, .13); stroke-width: 1; }
+    .knob .tick.major { stroke: rgba(255, 201, 92, .42); stroke-width: 1.1; }
+    .knob:hover .body { stroke: rgba(255, 201, 92, .68); }
+    .knob:hover .halo { stroke: rgba(255, 154, 36, .30); }
+
+    .knob input {
+        position: absolute; left: 50%; top: 25px;
+        transform: translate(-50%, -50%);
+        width: 58px; height: 15px; padding: 0; border: 0; border-radius: 2px;
+        background: transparent; color: #fff;
+        font-family: var(--mono); font-size: 9.5px; font-weight: 400;
+        text-align: center; outline: none;
+        pointer-events: none;
+        -webkit-user-select: text; user-select: text;
+        -webkit-appearance: none; appearance: none;
+    }
+    .knob.editing { cursor: text; }
+    .knob.editing input {
+        pointer-events: auto;
+        background: rgba(255, 154, 36, .20);
+        box-shadow: 0 0 0 1px rgba(255, 201, 92, .7);
+    }
+    .knob .nm {
+        margin-top: 3px;
+        font-family: var(--mono); font-size: 7.5px; line-height: 9px;
+        letter-spacing: .1em; text-transform: uppercase;
+        color: rgba(238, 241, 255, .74);
+        white-space: nowrap;
+    }
+    .knob:hover .nm { color: #fff; }
+
+    /* 按键行 */
+    .brow { display: flex; gap: 7px; margin-top: 3px; }
+
+    /* 黑洞 / 白洞：单个双态滑动开关，不是两个按钮 */
+    .sw {
+        flex: 0 0 176px;
+        position: relative;
+        height: 31px;
+        border: 1px solid rgba(255, 201, 92, .22);
+        border-radius: 2px;
+        background: rgba(255, 201, 92, .025);
+        cursor: pointer;
+        overflow: hidden;
+        transition: border-color .18s ease;
+    }
+    .sw:hover { border-color: rgba(255, 201, 92, .5); }
+    /* 滑块用 transform 位移。
+       ★ 不要用 left 切换：本机 Chromium 上 .sw.wh .tab 的 left 不生效
+         （inline 设 left:55% 也被解析回 2px），而 transform 稳定可靠。 */
+    .sw .tab {
+        position: absolute;
+        top: 2px; bottom: 2px;
+        left: 2px;
+        width: calc(50% - 4px);
+        border-radius: 1px;
+        background: rgba(255, 201, 92, .14);
+        box-shadow: 0 0 12px rgba(255, 201, 92, .18), inset 0 0 10px rgba(255, 201, 92, .08);
+        border: 1px solid rgba(255, 201, 92, .58);
+        transform: translateX(0);
+        transition: transform .22s cubic-bezier(.4, 0, .2, 1),
+                    background .22s ease, border-color .22s ease, box-shadow .22s ease;
+    }
+    .sw.wh .tab {
+        transform: translateX(calc(100% + 4px));
+        background: rgba(255, 246, 226, .16);
+        border-color: rgba(255, 246, 226, .72);
+        box-shadow: 0 0 16px rgba(255, 246, 226, .28), inset 0 0 10px rgba(255, 246, 226, .12);
+    }
+    .sw .opt {
+        position: absolute;
+        top: 0; bottom: 0;
+        width: 50%;
+        display: flex; align-items: center; justify-content: center;
+        font-family: var(--mono); font-size: 8px; letter-spacing: .13em;
+        text-transform: uppercase;
+        color: var(--dim);
+        transition: color .22s ease;
+        pointer-events: none;
+        z-index: 1;
+    }
+    .sw .opt:first-of-type { left: 0; }
+    .sw .opt:last-of-type { right: 0; }
+    .sw:not(.wh) .opt:first-of-type { color: var(--gold); }
+    .sw.wh .opt:last-of-type { color: #fff6e6; }
+    .btn {
+        flex: 1; height: 31px;
+        border: 1px solid rgba(255, 201, 92, .22);
+        border-radius: 2px;
+        background: rgba(255, 201, 92, .025);
+        font-family: var(--mono); font-size: 8.5px; letter-spacing: .13em;
+        text-transform: uppercase; color: var(--dim);
+        cursor: pointer;
+        transition: all .16s ease;
+        white-space: nowrap;
+    }
+    .btn:hover { border-color: rgba(255, 201, 92, .52); color: var(--gold-dim); }
+    .btn.on {
+        border-color: var(--gold); color: var(--gold);
+        background: rgba(255, 201, 92, .10);
+        box-shadow: 0 0 14px rgba(255, 201, 92, .16), inset 0 0 12px rgba(255, 201, 92, .05);
+    }
+    .btn.on.wh {
+        border-color: #fff5da; color: #fff5da;
+        background: rgba(255, 245, 218, .12);
+        box-shadow: 0 0 16px rgba(255, 245, 218, .24);
+    }
+    .btn.run.on {
+        border-color: var(--red); color: var(--red);
+        background: rgba(255, 61, 36, .10);
+        box-shadow: 0 0 12px rgba(255, 61, 36, .18);
+    }
+    #btnStart, #btnLoop { flex: 0 0 84px; }
+
+    /* 底部信息行：轨道半径 + 湿声 */
+    .irow { display: flex; gap: 10px; align-items: flex-start; margin-top: 2px; }
+    .rad {
+        flex: 1; min-width: 0;
+        display: flex; flex-direction: column; gap: 6px;
+        font-family: var(--mono); font-size: 7px; letter-spacing: .15em;
+        text-transform: uppercase; color: var(--gold-dim);
+    }
+    .rad .top { display: flex; justify-content: space-between; align-items: baseline; line-height: 9px; }
+    .rad .top span:last-child { color: #fff; font-size: 8.5px; letter-spacing: .02em; }
+    .rad .track {
+        position: relative; height: 3px;
+        background: rgba(238, 241, 255, .09); border-radius: 2px; overflow: hidden;
+    }
+    .rad .fill {
+        position: absolute; left: 0; top: 0; bottom: 0; width: 100%;
+        background: linear-gradient(to right, var(--red), var(--amber), var(--gold));
+        box-shadow: 0 0 8px rgba(255, 154, 36, .45);
+        transition: width .07s linear;
+    }
+    .sep {
+        flex: 0 0 1px; align-self: stretch; margin: 0 2px;
+        background: linear-gradient(to bottom, transparent, rgba(255, 201, 92, .2), transparent);
+    }
+    .wet {
+        flex: 0 0 246px;
+        display: flex; flex-direction: column; gap: 5px;
+        font-family: var(--mono); font-size: 7px; letter-spacing: .15em;
+        text-transform: uppercase; color: var(--gold-dim);
+    }
+    .wet .top { display: flex; justify-content: space-between; align-items: baseline; line-height: 9px; }
+    .wet .top span:last-child { color: rgba(238, 241, 255, .28); letter-spacing: .05em; }
+    .dual { position: relative; height: 13px; }
+    .dual .ticks {
+        position: absolute; left: 0; right: 0; top: 50%; height: 4px; margin-top: -2px;
+        background: repeating-linear-gradient(90deg, rgba(255, 201, 92, .14) 0 1px, transparent 1px 10%);
+        pointer-events: none;
+    }
+    .dual .track {
+        position: absolute; left: 0; right: 0; top: 50%; height: 2px; margin-top: -1px;
+        background: rgba(238, 241, 255, .13);
+    }
+    .dual .fill {
+        position: absolute; top: 50%; height: 3px; margin-top: -1.5px;
+        background: linear-gradient(to right, var(--red), var(--gold));
+        box-shadow: 0 0 6px rgba(255, 201, 92, .42);
+    }
+    .dual .thumb {
+        position: absolute; top: 50%;
+        width: 8px; height: 8px; margin: -4px 0 0 -4px;
+        border-radius: 50%; background: var(--gold);
+        box-shadow: 0 0 8px rgba(255, 201, 92, .85);
+        cursor: ew-resize;
+    }
+    .dual .thumb:active { transform: scale(1.2); }
+    .wet .nums { display: flex; justify-content: space-between; }
+    .wet .nums input {
+        width: 52px; height: 13px; padding: 0; border: 0; border-radius: 2px;
+        background: transparent; color: #fff;
+        font-family: var(--mono); font-size: 8px; text-align: center;
+        outline: none;
+        -webkit-user-select: text; user-select: text;
+        -webkit-appearance: none; appearance: none;
+    }
+    .wet .nums input:focus {
+        background: rgba(255, 154, 36, .20);
+        box-shadow: 0 0 0 1px rgba(255, 201, 92, .7);
+    }
+
+    /* ================= 缩放三角 ================= */
+    #zoomer {
+        position: absolute; right: 0; bottom: 0;
+        width: 36px; height: 36px;
+        cursor: nwse-resize; touch-action: none; z-index: 30;
+        display: flex; align-items: flex-end; justify-content: flex-end; padding: 3px;
+    }
+    #zoomer::before {
+        content: ""; position: absolute; right: 0; bottom: 0;
+        width: 0; height: 0;
+        border-style: solid; border-width: 0 0 28px 28px;
+        border-color: transparent transparent rgba(255, 61, 36, .5) transparent;
+    }
+    #zoomer:hover::before { border-bottom-color: rgba(255, 201, 92, .8); }
+    body.dragging-zoom #zoomer::before { border-bottom-color: var(--gold); }
+    #zpct {
+        position: relative; z-index: 1;
+        font-family: var(--mono); font-size: 7px;
+        color: rgba(238, 241, 255, .5);
+        pointer-events: none; margin: 0 1px 1px 0;
+    }
+
+    body.dragging, body.dragging * { cursor: ns-resize !important; }
+    body.dragging-zoom, body.dragging-zoom * { cursor: nwse-resize !important; }
+</style>
+</head>
+<body>
+<div class="canvas" id="canvas">
+
+    <svg id="scene" viewBox="0 0 620 440">
+        <defs>
+            <!-- ★ 盘面渐变：横向 Doppler。左侧朝观测者运动 → 蓝移、更白更亮；
+                 右侧远离 → 红移、更暗更红。这条不对称是"一眼真"的关键。
+                 全部使用同一个渐变，前半圈与整圈才能无缝衔接。 -->
+            <linearGradient id="diskGrad" gradientUnits="userSpaceOnUse" x1="-250" y1="0" x2="250" y2="0">
+                <stop offset="0%"   stop-color="#ffffff" stop-opacity="0"/>
+                <stop offset="3%"   stop-color="#fbf3e2" stop-opacity=".62"/>
+                <stop offset="10%"  stop-color="#fdf4e0" stop-opacity=".78"/>
+                <stop offset="20%"  stop-color="#ffe8b6" stop-opacity=".84"/>
+                <stop offset="34%"  stop-color="#ffce78" stop-opacity=".84"/>
+                <stop offset="50%"  stop-color="#f9a63c" stop-opacity=".70"/>
+                <stop offset="64%"  stop-color="#d9701a" stop-opacity=".52"/>
+                <stop offset="78%"  stop-color="#9c3406" stop-opacity=".28"/>
+                <stop offset="90%"  stop-color="#521302" stop-opacity=".12"/>
+                <stop offset="100%" stop-color="#220700" stop-opacity="0"/>
+            </linearGradient>
+
+            <!-- 前半圈专用：同色相，但整体更亮 —— 它离观测者更近，
+                 所以穿过视界球的那一段必须比两翼亮，否则看起来像被"切开"。 -->
+            <linearGradient id="diskFrontGrad" gradientUnits="userSpaceOnUse" x1="-250" y1="0" x2="250" y2="0">
+                <stop offset="0%"   stop-color="#ffffff" stop-opacity="0"/>
+                <stop offset="3%"   stop-color="#fffaf0" stop-opacity=".72"/>
+                <stop offset="10%"  stop-color="#fffdf6" stop-opacity=".80"/>
+                <stop offset="20%"  stop-color="#fff4d2" stop-opacity=".84"/>
+                <stop offset="34%"  stop-color="#ffe0a0" stop-opacity=".84"/>
+                <stop offset="50%"  stop-color="#ffbe66" stop-opacity=".90"/>
+                <stop offset="64%"  stop-color="#f08a2a" stop-opacity=".74"/>
+                <stop offset="78%"  stop-color="#b44a0a" stop-opacity=".44"/>
+                <stop offset="90%"  stop-color="#5e1802" stop-opacity=".20"/>
+                <stop offset="100%" stop-color="#220700" stop-opacity="0"/>
+            </linearGradient>
+
+            <!-- 盘的内缘（ISCO 以内最热的那一层）：整体更白、衰减更陡 -->
+            <linearGradient id="diskHotGrad" gradientUnits="userSpaceOnUse" x1="-180" y1="0" x2="180" y2="0">
+                <stop offset="0%"   stop-color="#ffffff" stop-opacity="0"/>
+                <stop offset="6%"   stop-color="#ffffff" stop-opacity=".72"/>
+                <stop offset="22%"  stop-color="#fffaf0" stop-opacity=".80"/>
+                <stop offset="42%"  stop-color="#ffeec8" stop-opacity=".72"/>
+                <stop offset="62%"  stop-color="#f9b968" stop-opacity=".52"/>
+                <stop offset="82%"  stop-color="#a8400a" stop-opacity=".22"/>
+                <stop offset="100%" stop-color="#2a0800" stop-opacity="0"/>
+            </linearGradient>
+
+            <!-- 透镜环：同一材质，横向与盘同色 -->
+            <linearGradient id="ringGrad" gradientUnits="userSpaceOnUse" x1="-130" y1="0" x2="130" y2="0">
+                <stop offset="0%"   stop-color="#fdf6e6" stop-opacity=".94"/>
+                <stop offset="14%"  stop-color="#fdf2dc" stop-opacity=".92"/>
+                <stop offset="36%"  stop-color="#ffdb96" stop-opacity=".86"/>
+                <stop offset="60%"  stop-color="#ffb04a" stop-opacity=".62"/>
+                <stop offset="82%"  stop-color="#c14a0c" stop-opacity=".34"/>
+                <stop offset="100%" stop-color="#4a0f02" stop-opacity=".16"/>
+            </linearGradient>
+
+            <!-- 唯一一层辉光：半径远大于画布，靠渐变尾部消失，绝不留可见圆边 -->
+            <radialGradient id="haloGrad" cx="50%" cy="50%" r="50%">
+                <stop offset="0%"   stop-color="#ffc072" stop-opacity=".15"/>
+                <stop offset="18%"  stop-color="#ff9a2c" stop-opacity=".112"/>
+                <stop offset="38%"  stop-color="#d85a0c" stop-opacity=".054"/>
+                <stop offset="60%"  stop-color="#7e2604" stop-opacity=".021"/>
+                <stop offset="82%"  stop-color="#3a0e02" stop-opacity=".006"/>
+                <stop offset="100%" stop-color="#000000" stop-opacity="0"/>
+            </radialGradient>
+
+            <!-- 视界与环之间的等离子体薄层（只露在 86~112 的窄环里） -->
+            <!-- ★ 球与环之间的等离子体：必须有实际不透明度，
+                 否则星点会从这条缝里透出来，环看起来像"飘着的空心圈"。
+                 r=104 时：73% = 76、81% = 84（视界边缘）、96% = 100。 -->
+            <radialGradient id="innerGrad" cx="50%" cy="50%" r="50%">
+                <stop offset="0%"   stop-color="#000" stop-opacity="0"/>
+                <stop offset="58%"  stop-color="#c86414" stop-opacity=".16"/>
+                <stop offset="72%"  stop-color="#f09028" stop-opacity=".34"/>
+                <stop offset="84%"  stop-color="#ffb44c" stop-opacity=".44"/>
+                <stop offset="94%"  stop-color="#e07418" stop-opacity=".26"/>
+                <stop offset="100%" stop-color="#8a2c04" stop-opacity=".06"/>
+            </radialGradient>
+
+            <filter id="blur1" x="-50%" y="-50%" width="200%" height="200%">
+                <feGaussianBlur stdDeviation="0.8"/>
+            </filter>
+            <filter id="blur2" x="-55%" y="-55%" width="210%" height="210%">
+                <feGaussianBlur stdDeviation="2"/>
+            </filter>
+            <filter id="blur4" x="-60%" y="-60%" width="220%" height="220%">
+                <feGaussianBlur stdDeviation="4"/>
+            </filter>
+            <filter id="blur10" x="-70%" y="-70%" width="240%" height="240%">
+                <feGaussianBlur stdDeviation="10"/>
+            </filter>
+
+            <!-- ★★ 拖尾专用模糊：region 必须是 userSpaceOnUse 的绝对范围。
+                 用百分比（blur4 那种 x=-60% width=220%）时，region 是按**包围盒**算的：
+                 拖尾又细又长，包围盒高度只有几 px，240% 也就十几 px，
+                 高斯模糊到边界直接被裁断 → 柔光外面出现一个**方形**硬边。
+                 这里给整个场景的绝对范围，模糊永远跑不出边界。 -->
+            <filter id="trailBlurS" filterUnits="userSpaceOnUse"
+                    x="-340" y="-260" width="700" height="520">
+                <feGaussianBlur stdDeviation="2.2"/>
+            </filter>
+            <filter id="trailBlurL" filterUnits="userSpaceOnUse"
+                    x="-340" y="-260" width="700" height="520">
+                <feGaussianBlur stdDeviation="6"/>
+            </filter>
+
+            <!-- ★ 拖尾渐变：向量每帧由 JS 从"尾端"指到"头端"，所以尾淡头亮。
+                 必须 userSpaceOnUse —— objectBoundingBox 会随路径包围盒转，
+                 短拖尾时方向完全是乱的。 -->
+            <linearGradient id="trailGrad" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="10" y2="0">
+                <stop offset="0%"   stop-color="#ffe9bd" stop-opacity="0"/>
+                <stop offset="42%"  stop-color="#ffe3b0" stop-opacity=".30"/>
+                <stop offset="76%"  stop-color="#ffd98a" stop-opacity=".74"/>
+                <stop offset="100%" stop-color="#fffdf6" stop-opacity="1"/>
+            </linearGradient>
+
+
+            <!-- ★★ 盘的形状掩罩 = 一个**压扁的径向渐变**，不是"椭圆挖椭圆"。
+                 挖洞会留下硬内缘（球周围一圈死黑缝隙），渐变则是自然淡出。
+                 56% = r_flat 140，76% = 190 → 内洞等效 190×59，且过渡带宽 50px，内缘是柔的。
+                 gradientTransform 的 0.315 必须与盘的 ry/rx 一致，否则光带会被拉歪。 -->
+            <radialGradient id="ringMaskGrad" gradientUnits="userSpaceOnUse"
+                            cx="0" cy="0" r="250" gradientTransform="scale(1 0.312)">
+                <stop offset="0%"   stop-color="#fff" stop-opacity="0"/>
+                <stop offset="56%"  stop-color="#fff" stop-opacity="0"/>
+                <stop offset="66%"  stop-color="#fff" stop-opacity=".42"/>
+                <stop offset="76%"  stop-color="#fff" stop-opacity="1"/>
+                <stop offset="84%"  stop-color="#fff" stop-opacity=".92"/>
+                <stop offset="93%"  stop-color="#fff" stop-opacity=".52"/>
+                <stop offset="100%" stop-color="#fff" stop-opacity="0"/>
+            </radialGradient>
+
+            <mask id="diskHole" maskUnits="userSpaceOnUse" x="-320" y="-160" width="640" height="320">
+                <ellipse cx="0" cy="0" rx="250" ry="78" fill="url(#ringMaskGrad)"/>
+            </mask>
+
+            <!-- ★★★ 近侧盘：在球前方经过，但只该盖住球的下半。
+                 挖掉的不是 y<0 这条直线（那会留下横穿画面的硬边），
+                 而是"球内 + 上半圆"这块区域 —— 它才是被视界挡住的部分。 -->
+            <mask id="frontDisk" maskUnits="userSpaceOnUse" x="-320" y="-160" width="640" height="320">
+                <ellipse cx="0" cy="0" rx="250" ry="78" fill="url(#ringMaskGrad)"/>
+                <path d="M -87 0 A 87 87 0 0 1 87 0 Z" fill="#000"/>
+            </mask>
+
+            <!-- 场景整体压暗到边缘，与下方控制区自然衔接 -->
+            <radialGradient id="vign" cx="50%" cy="46%" r="62%">
+                <stop offset="0%"   stop-color="#000" stop-opacity="0"/>
+                <stop offset="66%"  stop-color="#000" stop-opacity="0"/>
+                <stop offset="100%" stop-color="#000" stop-opacity=".72"/>
+            </radialGradient>
+        </defs>
+
+        <g id="dustLayer"></g>
+
+        <!-- ★ 视角：从盘面上方约 18° 俯视。
+             ry / rx = 78 / 250 = 0.312 → 仰角 asin(0.312) ≈ 18.2°。
+             太小（<8°）盘压成一条线，看不出前后；太大（>30°）就不像星际穿越了。
+             视界 84；光子环 85.5。 -->
+        <g id="bh" transform="translate(310 214)">
+            <!-- 1. 大范围引力辉光 -->
+            <circle r="330" fill="url(#haloGrad)"/>
+
+            <!-- 2. 球的等离子体外衣：先铺在球外，球再盖上去。
+                 这一步同时解决「环与球之间透光」。 -->
+            <circle r="104" fill="url(#innerGrad)"/>
+
+            <!-- ★ 3. 引力透镜像：**只有上下两段弧**，没有整圆。
+                 整圆的左右两半是假的 —— 那颗环原本会被盘自己挡住，
+                 画出来就成了"中间透明的一圈竖环"，一眼假。
+                 上下两段 = 远侧盘被引力弯过视界上方的像，是黑洞最强的识别特征。 -->
+            <path id="ringTop" fill="none" stroke="url(#ringGrad)" stroke-width="6"
+                  stroke-linecap="round" opacity=".34" filter="url(#blur4)"/>
+            <path id="ringTopCore" fill="none" stroke="#fff7e2" stroke-width="1.8"
+                  stroke-linecap="round" opacity=".62" filter="url(#blur1)"/>
+            <path id="ringBot" fill="none" stroke="url(#ringGrad)" stroke-width="6"
+                  stroke-linecap="round" opacity=".28" filter="url(#blur4)"/>
+            <path id="ringBotCore" fill="none" stroke="#fff7e2" stroke-width="1.8"
+                  stroke-linecap="round" opacity=".45" filter="url(#blur1)"/>
+
+            <!-- 4. 盘的竖向亮度溢出（不加遮罩，负责"光晕"） -->
+            <ellipse rx="238" ry="104" fill="url(#haloGrad)" opacity=".32"/>
+
+            <!-- 5. 吸积盘远侧。柔光层也走同一个掩罩，只是被 blur 拉得更散，
+                 这样盘的"厚度"是渐变的，不会有两条平行的硬边。 -->
+            <g mask="url(#diskHole)">
+                <ellipse rx="256" ry="86" fill="url(#diskGrad)" opacity=".30" filter="url(#blur10)"/>
+                <ellipse rx="252" ry="82" fill="url(#diskGrad)" opacity=".62" filter="url(#blur4)"/>
+                <ellipse rx="250" ry="78" fill="url(#diskGrad)" opacity=".88" filter="url(#blur2)"/>
+                <!-- 内缘最热的一圈：紧贴视界，是"吸积盘正在被吃掉"的视觉焦点 -->
+                <ellipse rx="112" ry="36" fill="url(#diskHotGrad)" opacity=".52" filter="url(#blur4)"/>
+            </g>
+
+            <!-- 6. 事件视界：纯黑球 -->
+            <circle id="horizon" r="84" fill="#000"/>
+
+            <!-- 7. 光子环：紧贴视界外侧 -->
+            <circle r="85.5" fill="none" stroke="#ffd98a" stroke-width="5"
+                    opacity=".20" filter="url(#blur4)"/>
+            <circle r="85.5" fill="none" stroke="#fff8e6" stroke-width="1.5"
+                    opacity=".88" filter="url(#blur1)"/>
+
+            <!-- 9. 近侧盘：压在球上。它离观测者更近，用更亮的 diskFrontGrad。
+                 frontDisk 遮罩只挖掉「球内 + 上半圆」，所以球的上半永远干净，
+                 球外两侧完整保留 —— 不会出现横穿画面的硬直线。 -->
+            <g mask="url(#frontDisk)">
+                <ellipse rx="256" ry="86" fill="url(#diskFrontGrad)" opacity=".26" filter="url(#blur10)"/>
+                <ellipse rx="252" ry="82" fill="url(#diskFrontGrad)" opacity=".70" filter="url(#blur4)"/>
+                <ellipse rx="250" ry="78" fill="url(#diskFrontGrad)" opacity=".95" filter="url(#blur2)"/>
+                <ellipse rx="116" ry="37" fill="url(#diskHotGrad)" opacity=".72" filter="url(#blur4)"/>
+            </g>
+
+            <!-- 10. 声源 = 一颗卫星 + 拖尾带。**放在最后**，永远压在最上层。
+                 为什么不做"被盘挡住"：它是声源位置的 UI 标记，不是天体，
+                 被近侧盘吃掉一半会被当成渲染 bug。
+                 也不再画"小光环"：同心亮环会和吸积盘的环抢戏。 -->
+            <!-- ★ 三层：暗影 → 柔光 → 亮线，三层都是**填充的锥形带**（不是等宽描边）。
+                 等宽描边尾端是个圆头，看着像半截棍子；锥形带收成一个尖角才像彗尾。
+                 暗影不是装饰：拖尾会经过吸积盘最亮的一段，浅色在那儿直接消失。 -->
+            <path id="trailShadow" fill="#02030a" opacity="0"
+                  pointer-events="none" filter="url(#trailBlurS)"/>
+            <!-- 柔光用固定暖色：复用渐变会被 blur 抹成灰色，尾迹一截就脏了 -->
+            <path id="trailGlow" fill="#ffab3c" opacity="0"
+                  pointer-events="none" filter="url(#trailBlurL)"/>
+            <path id="trailLine" fill="url(#trailGrad)" opacity="0"
+                  pointer-events="none"/>
+            <!-- 卫星本体：机体长轴沿运动方向，两翼垂直于运动方向 -->
+            <g id="sat" opacity="0" pointer-events="none">
+                <circle class="sat-shadow" r="6"/>
+                <line class="sat-strut" x1="0" y1="-7.2" x2="0" y2="7.2"/>
+                <rect class="sat-wing" x="-0.85" y="-7.2" width="1.7" height="4.4" rx="0.4"/>
+                <rect class="sat-wing" x="-0.85" y="2.8" width="1.7" height="4.4" rx="0.4"/>
+                <rect class="sat-body" x="-2.7" y="-1.75" width="5.4" height="3.5" rx="0.9"/>
+                <circle class="sat-core" r="1.15"/>
+            </g>
+        </g>
+
+        <rect x="0" y="0" width="620" height="440" fill="url(#vign)" pointer-events="none"/>
+    </svg>
+
+    <div class="hdr">
+        <svg class="mark" viewBox="0 0 16 16" fill="none" aria-hidden="true" style="width:13px;height:13px;flex:none;display:block">
+  <path d="M8.00 6.80L8.15 6.77L8.31 6.75L8.48 6.75L8.65 6.78L8.83 6.83L9.00 6.90L9.17 6.99L9.33 7.11L9.48 7.26L9.62 7.43L9.74 7.61L9.84 7.83L9.92 8.05L9.96 8.30L9.98 8.56L9.97 8.83L9.92 9.10L9.84 9.38L9.71 9.65L9.55 9.91L9.35 10.17L9.12 10.40L8.84 10.61L8.54 10.80L8.20 10.94L7.83 11.05L7.43 11.12L7.02 11.14L6.59 11.10L6.16 11.02L5.72 10.87L5.29 10.66L4.87 10.39L4.48 10.06L4.12 9.68L3.79 9.23L3.51 8.73L3.29 8.18L3.13 7.59L3.04 6.96L3.03 6.30L3.11 5.61" stroke="#ffc95c" stroke-width="1" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="8" cy="8" r="1.35" fill="#ffc95c"/>
+</svg>
+        <h1>SINGULARITY</h1>
+        <div class="sub">HRTF Binaural</div>
+        <div class="tag" id="modeTag">Accretion</div>
+    </div>
+
+    <div class="metercol l">
+        <div class="lb">L</div>
+        <div class="meterbody">
+            <div class="bar"><i id="mtrL"></i><b id="capL"></b></div>
+            <div class="dbscale" id="scaleL"></div>
+        </div>
+    </div>
+    <div class="metercol r">
+        <div class="lb">R</div>
+        <div class="meterbody mirror">
+            <div class="bar"><i id="mtrR"></i><b id="capR"></b></div>
+            <div class="dbscale" id="scaleR"></div>
+        </div>
+    </div>
+
+    <div class="deck">
+        <div class="krow a" id="krow1"></div>
+        <div class="krow" id="krow2"></div>
+
+        <!-- ★ 按键同样按信号流：Doppler（第 2 级）→ 黑洞/白洞（运动方向）→ Running → Loop -->
+        <div class="brow">
+            <button class="btn on" id="btnDop">Doppler</button>
+            <div class="sw" id="modeSw" role="switch" aria-checked="false" title="黑洞 / 白洞">
+                <div class="tab"></div>
+                <div class="opt">Black Hole</div>
+                <div class="opt">White Hole</div>
+            </div>
+            <button class="btn run on" id="btnStart">Running</button>
+            <button class="btn run on" id="btnLoop">Loop</button>
+        </div>
+
+        <div class="irow">
+            <div class="rad">
+                <div class="top"><span>Orbit Radius</span><span id="rPct">92%</span></div>
+                <div class="track"><div class="fill" id="rFill"></div></div>
+            </div>
+
+            <div class="sep"></div>
+
+            <div class="wet">
+                <div class="top"><span>Wet Send · Min / Max</span><span>reverb</span></div>
+                <div class="dual" id="wetDual">
+                    <div class="ticks"></div>
+                    <div class="track"></div>
+                    <div class="fill" id="wetFill"></div>
+                    <div class="thumb" id="wetMinThumb"></div>
+                    <div class="thumb" id="wetMaxThumb"></div>
+                </div>
+                <div class="nums">
+                    <input id="wetMinIn" type="text" inputmode="decimal" value="0.10" spellcheck="false" autocomplete="off">
+                    <input id="wetMaxIn" type="text" inputmode="decimal" value="0.30" spellcheck="false" autocomplete="off">
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div id="zoomer" title="拖动缩放界面，双击回到 100%">
+    <span id="zpct">100%</span>
+</div>
+
+<script type="module">
+import { Cabbage } from './cabbage/cabbage.js';
+
+const $ = id => document.getElementById(id);
+const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
+const NS = 'http://www.w3.org/2000/svg';
+
+/* ---------------- 参数表 ----------------
+   min / max / def 必须与 CSD 的 <Cabbage> 逐项一致（def = defaultValue，双击归位回到它）。
+   curve 是纯前端手感，不写进 CSD —— 宿主只认值，不认曲线。
+     curve = 0    线性
+     curve = k>0  指数：低端展开（小值占大半行程），高端压缩
+     curve = k<0  反向：高端展开
+   k 越大低端越松。时间 / 频率这类跨两三个数量级的参数必须给曲线，否则常用的
+   前 5% 数值区间会挤在旋钮的头几像素里，物理上拧不到（旧版 skew: 0.25 就是这个毛病，
+   fallTime 从 10 调到 20 只跨 1e-7 的行程）。 */
+const P = {
+    masterGain:    { min: 0,    max: 8,     curve: 0, step: 0.01,  def: 2,    fmt: v => v.toFixed(2) },
+    fallTime:      { min: 0.1,  max: 600,   curve: 6, step: 0.01,  def: 4,    fmt: v => v < 10 ? v.toFixed(2) : String(Math.round(v)) },
+    gravityCurve:  { min: 0.2,  max: 5,     curve: 4, step: 0.01,  def: 0.5,  fmt: v => v.toFixed(2) },
+    spinSpeed:     { min: 0.05, max: 0.5,   curve: 0, step: 0.001, def: 0.25, fmt: v => v.toFixed(3) },
+    inputGain:     { min: 0,    max: 4,     curve: 0, step: 0.01,  def: 1,    fmt: v => v.toFixed(2) },
+    dopplerFactor: { min: -100, max: 100,   curve: 0, step: 0.1,   def: -100, fmt: v => v.toFixed(1) },
+    roomSize:      { min: 10,   max: 100,   curve: 1, step: 0.1,   def: 50,   fmt: v => String(Math.round(v)) },
+    cutoff:        { min: 1000, max: 16000, curve: 3, step: 1,     def: 16000, fmt: v => String(Math.round(v)) }
+};
+
+/* 两行 × 四列，按「信号链」分组：先激励与运动，再空间与输出 */
+/* ★ 排列顺序 = CSD 里的信号流，不是随便摆。
+   读法：第一行左→右，再第二行左→右，严格单调递增。
+     1 inputGain     aMono = (aInL+aInR)*0.5*kInputGain
+     2 dopplerFactor doppler aMono, kSourcePos, ...
+     3 spinSpeed     kAngle += kSpinSpeed          ┐
+     4 fallTime      kRadius *= kFallRate          ├ 螺旋物理引擎
+     5 gravityCurve  kGainEnv = pow(kNormRadius)   ┘
+     6 roomSize      vdelay3 延迟 + 距离衰减 + reverbsc 反馈量
+     7 cutoff        reverbsc 阻尼低通
+     8 masterGain    aProcessed * kMasterGain      ← 总输出级，永远在最右 */
+const ROW1 = ['inputGain', 'dopplerFactor', 'spinSpeed', 'fallTime'];
+const ROW2 = ['gravityCurve', 'roomSize', 'cutoff', 'masterGain'];
+
+const LABEL = {
+    masterGain: 'Master', fallTime: 'Fall Time', gravityCurve: 'Gravity',
+    spinSpeed: 'Spin', inputGain: 'Input', dopplerFactor: 'Doppler',
+    roomSize: 'Room', cutoff: 'Cutoff'
+};
+
+/* 通道顺序必须与 CSD 里 widget 的书写顺序完全一致，错则静默失败 */
+const PARAM_IDX = ['fallTime', 'spinSpeed', 'gravityCurve', 'masterGain', 'inputGain',
+                   'dopplerFactor', 'mode', 'dopplerMode', 'start', 'loop',
+                   'minWet', 'maxWet', 'roomSize', 'cutoff',
+                   'sing_x', 'sing_y', 'sing_r', 'outL', 'outR'];
+
+const V = {};
+for (const k in P) V[k] = P[k].def;
+
+let minWet = 0.1, maxWet = 0.3;
+const S = { mode: 0, loop: 1, start: 1, dopplerMode: 1 };
+
+/* ---------------- 旋钮映射曲线 ----------------------------------------------
+   归一化值 n ∈ [0,1] ↔ 旋钮行程 f ∈ [0,1]。一个数 curve 定整条曲线：
+
+     n = (e^(k·f) − 1) / (e^k − 1)        k > 0  低端展开
+     f = ln(1 + n·(e^k − 1)) / k
+
+   k = 0 时退化成恒等（线性）。|k| 太大时 e^k 会溢出，钳到 12
+   （e^12 ≈ 1.6e5，双精度算这条式子误差远小于 1 像素）。
+   两式严格互逆，所以「拖动 → 写值 → 回灌 → 重画」不会漂。 */
+const CURVE_MAX_K = 12;
+const curveToNorm = (f, k) => {
+    if (!k) return f;
+    const K = Math.min(Math.abs(k), CURVE_MAX_K), A = Math.exp(K) - 1;
+    return k > 0 ? (Math.exp(K * f) - 1) / A
+                 : 1 - (Math.exp(K * (1 - f)) - 1) / A;
+};
+const normToCurve = (n, k) => {
+    if (!k) return n;
+    const K = Math.min(Math.abs(k), CURVE_MAX_K), A = Math.exp(K) - 1;
+    return k > 0 ? Math.log(1 + n * A) / K
+                 : 1 - Math.log(1 + (1 - n) * A) / K;
+};
+const toFrac = (v, p) => normToCurve(clamp((v - p.min) / (p.max - p.min), 0, 1), p.curve || 0);
+const fromFrac = (f, p) => p.min + (p.max - p.min) * curveToNorm(clamp(f, 0, 1), p.curve || 0);
+
+/* ---------------- 盘面几何 ----------------
+   粒子走在水平吸积盘这个压扁的椭圆上，不是平面圆。 */
+const DISK = { rx: 250, ry: 78 };
+
+/* 透镜环的上下亮弧：远侧盘被弯上来的像。
+   上弧 200°→340°，下弧 20°→160°，两端渐隐以免与赤道盘硬碰。 */
+(function buildRingArcs() {
+    const R = 88.5, N = 60;
+    const arc = (from, to) => {
+        let d = '';
+        for (let i = 0; i <= N; i++) {
+            const deg = from + (to - from) * i / N;
+            const a = deg * Math.PI / 180;
+            d += (i ? ' L' : 'M') + (R * Math.cos(a)).toFixed(1) + ' ' + (R * Math.sin(a)).toFixed(1);
+        }
+        return d;
+    };
+    const top = arc(200, 340);
+    const bot = arc(20, 160);
+    ['ringTop', 'ringTopCore'].forEach(id => $(id).setAttribute('d', top));
+    ['ringBot', 'ringBotCore'].forEach(id => $(id).setAttribute('d', bot));
+})();
+
+function diskMap(nx, ny) {           // nx, ny ∈ [-1, 1]
+    return { x: nx * DISK.rx, y: ny * DISK.ry };
+}
+
+/* ---------------- 星野 ---------------- */
+(function seedDust() {
+    let seed = 20261030;
+    const rnd = () => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed / 0x7fffffff; };
+    const g = $('dustLayer');
+    const tints = ['#ffffff', '#a8c8ff', '#ffd7a0', '#c9a8ff', '#a0ffd0', '#ffb0b0'];
+    for (let i = 0; i < 150; i++) {
+        const c = document.createElementNS(NS, 'circle');
+        c.setAttribute('cx', (8 + rnd() * 604).toFixed(1));
+        c.setAttribute('cy', (8 + rnd() * 424).toFixed(1));
+        c.setAttribute('r', (0.4 + rnd() * 1.2).toFixed(2));
+        c.setAttribute('fill', tints[Math.floor(rnd() * tints.length)]);
+        c.setAttribute('opacity', (0.12 + rnd() * 0.48).toFixed(2));
+        c.setAttribute('class', 'star');
+        c.style.animationDelay = (-rnd() * 6).toFixed(2) + 's';
+        g.appendChild(c);
+    }
+})();
+
+/* ---------------- 旋钮 ---------------- */
+const KB = { r: 21.5, span: 0.75 };
+const CIRC = 2 * Math.PI * KB.r;
+const SPAN = CIRC * KB.span;
+const KNOB_EL = {};
+
+function buildKnob(key, host) {
+    const el = document.createElement('div');
+    el.className = 'knob';
+    el.id = 'k_' + key;
+    el.dataset.ch = key;
+
+    const svg = document.createElementNS(NS, 'svg');
+    svg.setAttribute('viewBox', '0 0 52 52');
+
+    const halo = document.createElementNS(NS, 'circle');
+    halo.setAttribute('class', 'halo');
+    halo.setAttribute('cx', '26'); halo.setAttribute('cy', '26'); halo.setAttribute('r', '19.5');
+
+    const body = document.createElementNS(NS, 'circle');
+    body.setAttribute('class', 'body');
+    body.setAttribute('cx', '26'); body.setAttribute('cy', '26'); body.setAttribute('r', '18');
+
+    const ticks = document.createElementNS(NS, 'g');
+    for (let i = 0; i <= 20; i++) {
+        const f = i / 20, deg = 225 + f * 270, rad = deg * Math.PI / 180;
+        const major = i % 5 === 0;
+        const r1 = major ? 23.4 : 24.2, r2 = 25.6;
+        const ln = document.createElementNS(NS, 'line');
+        ln.setAttribute('x1', (26 + r1 * Math.sin(rad)).toFixed(2));
+        ln.setAttribute('y1', (26 - r1 * Math.cos(rad)).toFixed(2));
+        ln.setAttribute('x2', (26 + r2 * Math.sin(rad)).toFixed(2));
+        ln.setAttribute('y2', (26 - r2 * Math.cos(rad)).toFixed(2));
+        ln.setAttribute('class', major ? 'tick major' : 'tick');
+        ticks.appendChild(ln);
+    }
+
+    /* ★ 圆弧方向必须与刻度尺同向，否则填充与刻度整体错开 90°。
+       刻度尺 f=0 在 7:30（deg 225，以 sin/-cos 定义），顺时针扫 270° 到 4:30，缺口在正下方。
+       SVG <circle> 的路径从 3 点钟起、顺时针走 → 3:00 + 135° = 7:30，正好对上。 */
+    const gauge = document.createElementNS(NS, 'circle');
+    gauge.setAttribute('class', 'gauge');
+    gauge.setAttribute('cx', '26'); gauge.setAttribute('cy', '26');
+    gauge.setAttribute('r', String(KB.r));
+    gauge.setAttribute('transform', 'rotate(135 26 26)');
+
+    const arc = document.createElementNS(NS, 'circle');
+    arc.setAttribute('class', 'arc');
+    arc.setAttribute('id', 'a_' + key);
+    arc.setAttribute('cx', '26'); arc.setAttribute('cy', '26');
+    arc.setAttribute('r', String(KB.r));
+    arc.setAttribute('transform', 'rotate(135 26 26)');
+
+    svg.append(halo, body, ticks, gauge, arc);
+
+    const inp = document.createElement('input');
+    inp.id = 'v_' + key;
+    inp.type = 'text';
+    inp.inputMode = 'decimal';
+    inp.spellcheck = false;
+    inp.autocomplete = 'off';
+
+    const nm = document.createElement('div');
+    nm.className = 'nm';
+    nm.textContent = LABEL[key];
+
+    el.append(svg, inp, nm);
+    host.appendChild(el);
+
+    KNOB_EL[key] = el;
+    bindKnob(el, inp, key);
+}
+
+function paintKnob(key) {
+    const p = P[key], v = V[key];
+    const f = toFrac(clamp(v, p.min, p.max), p);
+    $('a_' + key).setAttribute('stroke-dasharray', (f * SPAN).toFixed(2) + ' ' + CIRC.toFixed(2));
+
+    if (editing.key === key) return;
+    $('v_' + key).value = p.fmt(v);
+}
+
+function paintAll() { for (const k in P) paintKnob(k); }
+
+/* ---------------- 编辑态 ---------------- */
+const editing = { key: null, el: null, knob: null };
+const DBL_MS = 350;
+let lastTapAt = 0, lastTapKey = null;
+
+function openEditor(key, el) {
+    if (editing.el === el) { el.select(); return; }
+    closeEditor(true);
+    editing.key = key;
+    editing.el = el;
+    editing.knob = el.closest('.knob');
+    if (editing.knob) editing.knob.classList.add('editing');
+    el.value = P[key].fmt(V[key]);
+    el.focus();
+    el.select();
+}
+
+function closeEditor(silent) {
+    const el = editing.el;
+    if (!el) return;
+    const wasKey = editing.key;
+    editing.key = null;
+    editing.el = null;
+    if (editing.knob) editing.knob.classList.remove('editing');
+    editing.knob = null;
+    if (!silent) { el.blur(); if (wasKey) paintKnob(wasKey); }
+}
+
+function parseNum(raw, p) {
+    if (raw == null) return NaN;
+    let t = String(raw).trim().toLowerCase().replace(/[,\s]/g, '');
+    if (!t) return NaN;
+    let mul = 1;
+    if (t.endsWith('k')) { mul = 1000; t = t.slice(0, -1); }
+    else if (t.endsWith('m')) { mul = 1e6; t = t.slice(0, -1); }
+    const v = parseFloat(t);
+    if (!isFinite(v)) return NaN;
+    return clamp(v * mul, p.min, p.max);
+}
+
+function commitEdit() {
+    const key = editing.key;
+    if (!key) return;
+    const v = parseNum(editing.el.value, P[key]);
+    closeEditor();
+    if (!isFinite(v)) { paintKnob(key); return; }
+    V[key] = v;
+    paintKnob(key);
+    Cabbage.sendControlData({ channel: key, value: v, gesture: 'complete' }, null);
+}
+
+function resetKnob(key) {
+    const d = P[key].def;
+    V[key] = d;
+    paintKnob(key);
+    Cabbage.sendControlData({ channel: key, value: d, gesture: 'complete' }, null);
+}
+
+let dragCount = 0;
+function beginDrag() { if (dragCount++ === 0) document.body.classList.add('dragging'); }
+function endDrag() { if (--dragCount <= 0) { dragCount = 0; document.body.classList.remove('dragging'); } }
+
+const draggingKeys = new Set();
+
+function bindKnob(el, txt, key) {
+    const p = P[key];
+    let active = false, dragging = false, onInput = false, moved = false;
+    let startY = 0, startX = 0, startF = 0, accF = 0, lastY = 0;
+
+    el.addEventListener('pointerdown', e => {
+        if (e.button !== 0) return;
+        active = true;
+        dragging = false;
+        onInput = (e.target === txt);
+        startX = e.clientX;
+        moved = false;
+        startY = e.clientY;
+        startF = toFrac(clamp(V[key], p.min, p.max), p);
+        accF = startF;
+        lastY = e.clientY;
+        if (!onInput) {
+            el.setPointerCapture(e.pointerId);
+            e.preventDefault();
+        }
+    });
+
+    el.addEventListener('pointermove', e => {
+        if (!active) return;
+        /* 编辑态：只记录有没有发生选词拖动，绝不旋钮拖动 */
+        if (onInput) {
+            if (Math.abs(e.clientX - startX) > 3 || Math.abs(e.clientY - startY) > 3) moved = true;
+            return;
+        }
+        const dy = startY - e.clientY;
+        if (!dragging) {
+            if (Math.abs(dy) < 3) return;
+            dragging = true;
+            draggingKeys.add(key);
+            beginDrag();
+            closeEditor(true);
+            Cabbage.sendControlData({ channel: key, value: V[key], gesture: 'begin' }, null);
+        }
+        e.preventDefault();
+        /* Shift 精调：同样位移只走 1/5 行程，长量程参数靠它做微调。
+           ★ 必须按「每帧增量」累加，不能用 (起点 → 当前) 的总位移：
+             否则拖动中途按下/松开 Shift，分母突变，数值会瞬间跳一大截。 */
+        accF = clamp(accF + (lastY - e.clientY) / (e.shiftKey ? 900 : 180), 0, 1);
+        lastY = e.clientY;
+        let v = fromFrac(accF, p);
+        v = clamp(Math.round(v / p.step) * p.step, p.min, p.max);
+        V[key] = v;
+        paintKnob(key);
+        Cabbage.sendControlData({ channel: key, value: v, gesture: 'value' }, null);
+    });
+
+    const up = e => {
+        if (!active) return;
+        active = false;
+        const wasInput = onInput, wasMoved = moved;
+        onInput = false; moved = false;
+        try { el.releasePointerCapture(e.pointerId); } catch (_) {}
+
+        if (dragging) {
+            dragging = false;
+            draggingKeys.delete(key);
+            endDrag();
+            Cabbage.sendControlData({ channel: key, value: V[key], gesture: 'end' }, null);
+            return;
+        }
+
+        /* 在文本框里拖动 = 选词，不算点击，更不能触发归位 */
+        if (wasMoved) { lastTapAt = 0; lastTapKey = null; return; }
+
+        const now = performance.now();
+        if (lastTapKey === key && now - lastTapAt < DBL_MS) {
+            lastTapAt = 0; lastTapKey = null;
+            closeEditor();
+            resetKnob(key);
+            return;
+        }
+        lastTapAt = now; lastTapKey = key;
+        if (!wasInput) openEditor(key, txt);
+    };
+    el.addEventListener('pointerup', up);
+    el.addEventListener('pointercancel', up);
+    el.addEventListener('contextmenu', e => e.preventDefault());
+
+    txt.addEventListener('keydown', e => {
+        e.stopPropagation();
+        if (e.key === 'Enter') { e.preventDefault(); commitEdit(); }
+        else if (e.key === 'Escape') {
+            e.preventDefault();
+            const k = editing.key;
+            closeEditor();
+            if (k) paintKnob(k);
+        }
+    });
+    txt.addEventListener('blur', () => { if (editing.key === key) commitEdit(); });
+    /* 不 stopPropagation：编辑态下第二击的 target 是 input，
+       若挡住冒泡，knob 收不到 pointerdown，双击归位永远不触发。 */
+    txt.addEventListener('dblclick', e => {
+        e.preventDefault(); e.stopPropagation();
+        closeEditor();
+        resetKnob(key);
+    });
+}
+
+/* ---------------- 混响发送双滑块 ---------------- */
+const wetDual = $('wetDual');
+
+function paintWet() {
+    const a = clamp(minWet, 0, 1), b = clamp(maxWet, 0, 1);
+    $('wetMinThumb').style.left = (a * 100) + '%';
+    $('wetMaxThumb').style.left = (b * 100) + '%';
+    const fill = $('wetFill');
+    fill.style.left = (Math.min(a, b) * 100) + '%';
+    fill.style.width = (Math.abs(b - a) * 100) + '%';
+    if (document.activeElement !== $('wetMinIn')) $('wetMinIn').value = minWet.toFixed(2);
+    if (document.activeElement !== $('wetMaxIn')) $('wetMaxIn').value = maxWet.toFixed(2);
+}
+
+let wetDrag = null;
+function bindWetThumb(el, which) {
+    el.addEventListener('pointerdown', e => {
+        if (e.button !== 0) return;
+        e.preventDefault();
+        el.setPointerCapture(e.pointerId);
+        wetDrag = which;
+        closeEditor(true);
+        const ch = which === 'min' ? 'minWet' : 'maxWet';
+        Cabbage.sendControlData({ channel: ch, value: which === 'min' ? minWet : maxWet, gesture: 'begin' }, null);
+    });
+    el.addEventListener('pointermove', e => {
+        if (wetDrag !== which) return;
+        e.preventDefault();
+        const r = wetDual.getBoundingClientRect();
+        const v = clamp((e.clientX - r.left) / r.width, 0, 1);
+        if (which === 'min') minWet = v; else maxWet = v;
+        paintWet();
+        const ch = which === 'min' ? 'minWet' : 'maxWet';
+        Cabbage.sendControlData({ channel: ch, value: v, gesture: 'value' }, null);
+    });
+    const up = e => {
+        if (wetDrag !== which) return;
+        wetDrag = null;
+        try { el.releasePointerCapture(e.pointerId); } catch (_) {}
+        const ch = which === 'min' ? 'minWet' : 'maxWet';
+        Cabbage.sendControlData({ channel: ch, value: which === 'min' ? minWet : maxWet, gesture: 'end' }, null);
+    };
+    el.addEventListener('pointerup', up);
+    el.addEventListener('pointercancel', up);
+}
+
+bindWetThumb($('wetMinThumb'), 'min');
+bindWetThumb($('wetMaxThumb'), 'max');
+
+for (const [id, which] of [['wetMinIn', 'min'], ['wetMaxIn', 'max']]) {
+    const inp = $(id);
+    inp.addEventListener('keydown', e => {
+        e.stopPropagation();
+        if (e.key === 'Enter') {
+            e.preventDefault();
+            const v = clamp(parseFloat(inp.value), 0, 1);
+            if (isFinite(v)) {
+                if (which === 'min') minWet = v; else maxWet = v;
+                Cabbage.sendControlData({ channel: which === 'min' ? 'minWet' : 'maxWet', value: v, gesture: 'complete' }, null);
+            }
+            inp.blur();
+            paintWet();
+        } else if (e.key === 'Escape') {
+            e.preventDefault();
+            inp.blur();
+            paintWet();
+        }
+    });
+    inp.addEventListener('blur', paintWet);
+}
+
+/* ---------------- 开关 ---------------- */
+function paintSwitches() {
+    $('modeSw').classList.toggle('wh', S.mode === 1);
+    $('modeSw').setAttribute('aria-checked', S.mode === 1 ? 'true' : 'false');
+    $('btnStart').classList.toggle('on', S.start === 1);
+    $('btnStart').textContent = S.start === 1 ? 'Running' : 'Stopped';
+    $('btnLoop').classList.toggle('on', S.loop === 1);
+    $('btnDop').classList.toggle('on', S.dopplerMode === 1);
+    $('btnDop').textContent = S.dopplerMode === 1 ? 'Doppler' : 'Raw';
+    $('modeTag').textContent = S.mode === 1 ? 'Ejection' : 'Accretion';
+    applyModeLook();
+}
+
+function setSwitch(ch, v) {
+    Cabbage.sendControlData({ channel: ch, value: v, gesture: 'complete' }, null);
+}
+
+function bindToggle(el, ch, onPick) {
+    el.addEventListener('click', e => {
+        e.preventDefault();
+        setSwitch(ch, onPick());
+        paintSwitches();
+    });
+}
+
+/* 滑动开关：点一下就切换状态 */
+$('modeSw').addEventListener('click', e => {
+    e.preventDefault();
+    S.mode = S.mode ? 0 : 1;
+    setSwitch('mode', S.mode);
+    paintSwitches();
+});
+bindToggle($('btnStart'), 'start', () => { S.start = S.start ? 0 : 1; return S.start; });
+bindToggle($('btnLoop'), 'loop', () => { S.loop = S.loop ? 0 : 1; return S.loop; });
+bindToggle($('btnDop'), 'dopplerMode', () => { S.dopplerMode = S.dopplerMode ? 0 : 1; return S.dopplerMode; });
+
+/* ---------------- 卫星与拖尾 ----------------
+   声源被画成一颗卫星：机体长轴永远朝运动方向，两翼垂直于运动方向，
+   后面拖一小段平滑尾迹。
+
+   ★ 长度按**弧长**限制，不按点数。
+     两者差很多：卫星在轨道外圈时一帧能走 20~25px，7 个点就是 170px；
+     跑到内圈一帧才走 2px，7 个点只有 14px。要的是"固定长度的尾迹"，
+     只能量弧长。
+   ★ 形状必须过一道 Chaikin 切角 + Catmull-Rom 转贝塞尔：
+     直接连点就是折线，视觉上像锯齿。 */
+const TRAIL_LEN = 52;           // 尾迹弧长上限（px）
+const TRAIL_MAX = 14;           // 原始采样点数上限（只防内存，不决定视觉长度）
+const TRAIL_MIN_STEP = 0.9;     // 位移小于这个就不记新点，避免原地抖动堆重合点
+const trail = [];
+
+/* 从头部往回量弧长，超了就砍掉尾巴 */
+function trimTrail() {
+    let acc = 0, i = trail.length - 1;
+    while (i > 0) {
+        acc += Math.hypot(trail[i].x - trail[i - 1].x, trail[i].y - trail[i - 1].y);
+        if (acc > TRAIL_LEN) break;
+        i--;
+    }
+    if (i > 0) trail.splice(0, i);
+}
+let lastPad = null;
+let satAngle = 0;               // 当前朝向（度），做平滑避免抖动
+const SAT_TAU = 0.28;           // 每帧向目标角度靠拢的比例
+
+/* sing_x / sing_y 是两条独立消息，先后到达。
+   若每条都立刻重画，会画出 (新X, 旧Y) 的中间态，尾迹成阶梯。
+   合并到同一帧再画，坐标才是同一时刻的。 */
+let lastNX = 0.5, lastNY = 0.5, lastNR = 0.5;
+let padRaf = 0;
+function schedulePad() {
+    if (padRaf) return;
+    padRaf = requestAnimationFrame(() => {
+        padRaf = 0;
+        paintPad(lastNX, lastNY, lastNR);
+    });
+}
+
+/* 折线 → 平滑曲线（Chaikin 切角，每段取 1/4、3/4 两点，迭代两次）。
+   两端点严格保留，所以尾迹始终顶着卫星。 */
+function chaikin(pts, iter) {
+    let p = pts;
+    for (let k = 0; k < iter && p.length >= 3; k++) {
+        const q = [p[0]];
+        for (let i = 0; i < p.length - 1; i++) {
+            const a = p[i], b = p[i + 1];
+            q.push({ x: a.x * 0.75 + b.x * 0.25, y: a.y * 0.75 + b.y * 0.25 });
+            q.push({ x: a.x * 0.25 + b.x * 0.75, y: a.y * 0.25 + b.y * 0.75 });
+        }
+        q.push(p[p.length - 1]);
+        p = q;
+    }
+    return p;
+}
+
+/* 沿平滑折线生成**锥形带**：尾端宽度 0（一个尖角），头端宽度 wMax。
+   ★ 为什么用填充带而不是等宽描边：
+       等宽描边尾端永远是圆头/方头，不管加多长的渐变淡出，
+       末梢那个"半截棍子"的轮廓都在。锥形带收成尖角，才是彗尾。
+   ★ 点已经过 Chaikin（密度 ×4），直接 L 连接肉眼就是曲线；
+       紧弯处也不会自交 —— 半径远大于半宽（≤3px）。 */
+function ribbonPath(pts, wMax) {
+    const n = pts.length, f = v => v.toFixed(1);
+    const left = [], right = [];
+    for (let i = 0; i < n; i++) {
+        const t = i / (n - 1);                       // 0 = 尾，1 = 头
+        const w = wMax * Math.pow(t, 1.15);          // 近似线性收缩 → 三角形
+        const a = pts[Math.max(0, i - 1)], b = pts[Math.min(n - 1, i + 1)];
+        let dx = b.x - a.x, dy = b.y - a.y;
+        const L = Math.hypot(dx, dy) || 1;
+        dx /= L; dy /= L;
+        left.push([pts[i].x - dy * w, pts[i].y + dx * w]);
+        right.push([pts[i].x + dy * w, pts[i].y - dx * w]);
+    }
+    let d = 'M' + f(left[0][0]) + ' ' + f(left[0][1]);
+    for (let i = 1; i < n; i++) d += ' L' + f(left[i][0]) + ' ' + f(left[i][1]);
+    for (let i = n - 1; i >= 0; i--) d += ' L' + f(right[i][0]) + ' ' + f(right[i][1]);
+    return d + ' Z';
+}
+
+function paintPad(nx01, ny01, nr) {
+    const nx = (nx01 - 0.5) * 2;
+    const ny = (ny01 - 0.5) * 2;
+    const p = diskMap(nx, ny);
+
+    /* sing_r 是 0..0.5 的绝对半径，只用于读数；不画当前半径圆，
+       否则又多一圈同心环 */
+    const norm = clamp(nr / 0.5, 0, 1);
+
+    $('rFill').style.width = (norm * 100).toFixed(1) + '%';
+    $('rPct').textContent = Math.round(norm * 100) + '%';
+
+    /* 越靠近奇点越热：拖尾更宽更亮，卫星更亮 */
+    const hot = 1 - norm;
+
+    /* 位置突变（重生 / Teleport / Start）时清空，否则会连出横穿画布的直线 */
+    if (lastPad && Math.hypot(p.x - lastPad.x, p.y - lastPad.y) > 70) {
+        trail.length = 0;
+        satAngle = 0;
+    }
+    if (!lastPad || Math.hypot(p.x - lastPad.x, p.y - lastPad.y) > TRAIL_MIN_STEP) {
+        trail.push({ x: p.x, y: p.y });
+        trimTrail();
+        if (trail.length > TRAIL_MAX) trail.shift();
+    } else if (trail.length) {
+        trail[trail.length - 1] = { x: p.x, y: p.y };   // 原地微动只挪末点，不堆点
+    }
+    lastPad = p;
+
+    /* ---- 朝向：取最近一段的位移方向，按最短角差平滑 ---- */
+    if (trail.length >= 2) {
+        const a = trail[trail.length - 2], b = trail[trail.length - 1];
+        if (Math.hypot(b.x - a.x, b.y - a.y) > 0.05) {
+            const target = Math.atan2(b.y - a.y, b.x - a.x) * 180 / Math.PI;
+            let d = ((target - satAngle + 540) % 360) - 180;       // 归到 (-180, 180]
+            satAngle = (satAngle + d * SAT_TAU) % 360;
+        }
+    }
+    const sat = $('sat');
+    sat.setAttribute('transform', 'translate(' + p.x.toFixed(2) + ' ' + p.y.toFixed(2) + ')'
+                                 + ' rotate(' + satAngle.toFixed(1) + ')');
+    sat.setAttribute('opacity', '1');
+
+    /* ---- 拖尾：锥形带（尾尖头宽的三角形），三层同心放大 ---------- */
+    const line = $('trailLine'), glow = $('trailGlow'), shade = $('trailShadow');
+    if (trail.length >= 3) {
+        /* 线头退到机身后面：直接顶到卫星会看见带子穿过机翼 */
+        const head = trail[trail.length - 1], prev = trail[trail.length - 2];
+        const L = Math.hypot(head.x - prev.x, head.y - prev.y) || 1;
+        const cut = Math.min(4.2, L * 0.55);
+        const pts = chaikin(trail, 2);
+        const tipIdx = pts.length - 1;
+        pts[tipIdx] = {
+            x: head.x - (head.x - prev.x) / L * cut,
+            y: head.y - (head.y - prev.y) / L * cut
+        };
+
+        /* 三层同心：亮线 1×、暗影 1.35×（只在亮盘上起分离作用）、柔光 2.2×。
+           暗影再宽就是个灰楔子，柔光再亮就 blingbling。 */
+        const wHead = 1.75 + hot * 0.7;              // 头端半宽 → 全宽 3.5~4.9px
+        line.setAttribute('d', ribbonPath(pts, wHead));
+        shade.setAttribute('d', ribbonPath(pts, wHead * 1.35));
+        glow.setAttribute('d', ribbonPath(pts, wHead * 2.2));
+
+        line.setAttribute('opacity', '1');
+        shade.setAttribute('opacity', '0.38');
+        glow.setAttribute('opacity', (0.15 + hot * 0.13).toFixed(2));
+
+        /* 渐变向量：尾 → 头。两端重合时（原地不动）随机方向会让渐变闪，
+           退化为水平向量。 */
+        const g = $('trailGrad');
+        const tail = pts[0], tip = pts[tipIdx];
+        const dx = tip.x - tail.x, dy = tip.y - tail.y;
+        if (Math.hypot(dx, dy) > 0.5) {
+            g.setAttribute('x1', tail.x.toFixed(1));
+            g.setAttribute('y1', tail.y.toFixed(1));
+            g.setAttribute('x2', tip.x.toFixed(1));
+            g.setAttribute('y2', tip.y.toFixed(1));
+        } else {
+            g.setAttribute('x1', (tail.x - 10).toFixed(1));
+            g.setAttribute('y1', tail.y.toFixed(1));
+            g.setAttribute('x2', tail.x.toFixed(1));
+            g.setAttribute('y2', tail.y.toFixed(1));
+        }
+    } else {
+        line.setAttribute('opacity', '0');
+        glow.setAttribute('opacity', '0');
+        shade.setAttribute('opacity', '0');
+    }
+}
+
+function applyModeLook() {
+    const white = S.mode === 1;
+    $('horizon').setAttribute('fill', white ? '#fdf7e8' : '#000000');
+
+    /* 卫星：黑洞模式暖金，白洞模式冷白。走 class，别用 setAttribute('fill')
+       （presentation attribute 会被 CSS 规则覆盖）。 */
+    $('sat').classList.toggle('wh', white);
+
+    /* 拖尾渐变的停点走 setAttribute：stop-color 没有 CSS 规则去抢，安全。
+       （fill / stroke 那种有 CSS 规则的必须走 class，见 §6.13 坑零quater） */
+    const cols = white
+        ? ['#eaf4ff', '#dcecff', '#cfe4ff', '#ffffff']
+        : ['#ffe9bd', '#ffe3b0', '#ffd98a', '#fffdf6'];
+    $('trailGrad').querySelectorAll('stop').forEach((st, i) => {
+        if (cols[i]) st.setAttribute('stop-color', cols[i]);
+    });
+}
+
+/* ---------------- 电平表 ----------------
+   Csound 送来的是线性幅度（0dbfs=1 → 0..1），
+   表柱按 dB 显示：0 dB 在顶，-60 dB 在底（与 Stasis / Orbita / Levy 同一套）。 */
+const METER_H = 372;                    // 必须与 .bar / .dbscale 的 CSS 高度一致
+const DB_MIN = -60;
+/* 刻度往 0 dB 挤：等响感知下高端要密、低端要疏 */
+const DB_TICKS = [0, -6, -12, -18, -24, -30, -40, -50, -60];
+
+const ampToDb = a => 20 * Math.log10(Math.max(Math.abs(a), 1e-6));
+const dbToPos = db => clamp((db - DB_MIN) / (0 - DB_MIN), 0, 1);
+
+function buildDbScales() {
+    for (const id of ['scaleL', 'scaleR']) {
+        const el = $(id);
+        el.innerHTML = '';
+        for (const db of DB_TICKS) {
+            const t = document.createElement('div');
+            t.className = 't' + (db === 0 ? ' zero' : '') + (db % 12 === 0 ? ' major' : '');
+            t.style.bottom = (dbToPos(db) * 100).toFixed(3) + '%';
+            const n = document.createElement('span');
+            n.className = 'n';
+            n.textContent = db === 0 ? '0' : String(db);
+            t.appendChild(n);
+            el.appendChild(t);
+        }
+    }
+}
+
+function setMeter(barId, capId, amp) {
+    const db = clamp(ampToDb(amp), DB_MIN, 0);
+    const pos = dbToPos(db);
+    $(barId).style.transform = 'scaleY(' + pos.toFixed(4) + ')';
+    const cap = $(capId);
+    cap.style.transform = 'translateY(' + (-pos * METER_H).toFixed(1) + 'px)';
+    cap.style.opacity = pos > 0.002 ? '.95' : '0';
+    return amp;
+}
+
+/* ---------------- 后端回灌 ---------------- */
+function applyValue(ch, v) {
+    if (v === undefined || v === null) return;
+    v = Number(v);
+    if (!isFinite(v)) return;
+
+    if (ch in P) {
+        if (draggingKeys.has(ch)) return;          // 正在拖的旋钮不被回灌打断
+        V[ch] = clamp(v, P[ch].min, P[ch].max);
+        paintKnob(ch);
+        return;
+    }
+    switch (ch) {
+        case 'minWet': minWet = clamp(v, 0, 1); paintWet(); break;
+        case 'maxWet': maxWet = clamp(v, 0, 1); paintWet(); break;
+        case 'mode': S.mode = v > 0.5 ? 1 : 0; paintSwitches(); break;
+        case 'loop': S.loop = v > 0.5 ? 1 : 0; paintSwitches(); break;
+        case 'start': S.start = v > 0.5 ? 1 : 0; paintSwitches(); break;
+        case 'dopplerMode': S.dopplerMode = v > 0.5 ? 1 : 0; paintSwitches(); break;
+        case 'sing_x': lastNX = v; schedulePad(); break;
+        case 'sing_y': lastNY = v; schedulePad(); break;
+        case 'sing_r': lastNR = v; schedulePad(); break;
+        case 'outL': setMeter('mtrL', 'capL', v); break;
+        case 'outR': setMeter('mtrR', 'capR', v); break;
+    }
+}
+
+/* ---------------- 消息桥 ---------------- */
+Cabbage.addMessageListener(msg => {
+    if (!msg) return;
+    const data = msg.data ?? msg;
+    if (msg.command === 'widgetUpdate') {
+        const id = data.id ?? data.channel;
+        const v = data.value !== undefined ? data.value : Cabbage.extractValue(data, id);
+        applyValue(id, v);
+    } else if (msg.command === 'batchWidgetUpdate') {
+        for (const w of msg.widgets ?? []) {
+            const e = w.data ?? w;
+            applyValue(e.id, Cabbage.extractValue(e, e.id));
+        }
+    } else if (msg.command === 'resizeResponse') {
+        if (hostResize !== 'accepted') {
+            const d = msg.data ?? msg;
+            hostResize = d.accepted ? 'accepted' : 'rejected';
+            if (hostResize === 'accepted') { reqViewport = 0; clearTimeout(reqTimer); }
+            paintZoomBadge();
+        }
+    } else if (msg.command === 'parameterChange') {
+        const pm = msg.data ?? msg;
+        const id = typeof pm.channel === 'string' ? pm.channel : PARAM_IDX[pm.paramIdx];
+        if (id) applyValue(id, pm.value);
+    }
+});
+
+/* ---------------- 窗口缩放 ----------------
+   canvas 的设计尺寸 = 默认窗口尺寸，BASE = 1。
+   改默认大小时只改 CANVAS 与 CSD 的 form.size（两者必须一致）。 */
+const CANVAS = { w: 620, h: 700 };
+const BASE = 1;
+const MIN_SCALE = 0.75 * BASE;
+const MAX_FILL = 0.94;
+const screenW = () => (screen.availWidth || screen.width || 0);
+const screenH = () => (screen.availHeight || screen.height || 0);
+
+function maxScale() {
+    const sw = screenW(), sh = screenH();
+    const byW = sw ? sw / CANVAS.w : 3;
+    const byH = sh ? sh / CANVAS.h : 3;
+    return Math.max(MIN_SCALE, Math.min(12, Math.min(byW, byH) * MAX_FILL));
+}
+
+const viewScale = () => Math.min(innerWidth / CANVAS.w, innerHeight / CANVAS.h);
+/* 必须用屏幕绝对坐标：clientY 相对窗口，宿主 resize 时窗口移动会让它漂移并反馈成反向 */
+const yOf = e => (typeof e.screenY === 'number' && e.screenY !== 0) ? e.screenY : e.clientY;
+
+let hostResize = 'unknown', reqViewport = 0, reqTimer = 0;
+let zoomDrag = null, holdScale = null;
+let pendingScale = null, rafId = 0, lastSent = 0, dragEndedAt = 0;
+
+function paintZoomBadge(override) {
+    const s = override != null ? override : viewScale();
+    /* 无条件写 --zoom：拖动时画布要「领先」窗口，否则先露白边 */
+    document.body.style.setProperty('--zoom', s.toFixed(4));
+    $('zpct').textContent = Math.round(s / BASE * 100) + '%';
+    $('zoomer').dataset.host = hostResize;
+}
+
+function fitToViewport() {
+    if (reqViewport && (innerWidth !== reqViewport.w || innerHeight !== reqViewport.h)) {
+        reqViewport = 0; clearTimeout(reqTimer); hostResize = 'accepted';
+    }
+    if (holdScale != null && Math.abs(viewScale() - holdScale) < 0.01) holdScale = null;
+    paintZoomBadge(zoomDrag && zoomDrag.moved ? zoomDrag.target : (holdScale ?? undefined));
+}
+
+function requestWindowScale(sc) {
+    let w = Math.round(CANVAS.w * sc);
+    let h = Math.round(CANVAS.h * sc);
+    const limit = Math.floor(screenH() * MAX_FILL);
+    if (limit > 0 && h > limit) { h = limit; w = Math.round(h * CANVAS.w / CANVAS.h); }
+    reqViewport = { w: innerWidth, h: innerHeight };
+    clearTimeout(reqTimer);
+    reqTimer = setTimeout(() => {
+        if (reqViewport) { reqViewport = 0; hostResize = 'rejected'; holdScale = null; paintZoomBadge(); }
+    }, 600);
+    Cabbage.requestResize(w, h, null);
+}
+
+function scheduleResizeRequest() {
+    if (rafId) return;
+    rafId = requestAnimationFrame(() => {
+        rafId = 0;
+        if (pendingScale == null) return;
+        if (lastSent && Math.abs(pendingScale - lastSent) < 0.004) return;
+        lastSent = pendingScale;
+        requestWindowScale(lastSent);
+    });
+}
+
+$('zoomer').addEventListener('pointerdown', e => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    $('zoomer').setPointerCapture(e.pointerId);
+    const s = viewScale();
+    zoomDrag = { anchorY: yOf(e), startScale: s, moved: false, target: s,
+                 ceiling: Math.max(s, maxScale()) };
+    document.body.classList.add('dragging-zoom');
+});
+
+$('zoomer').addEventListener('pointermove', e => {
+    if (!zoomDrag) return;
+    /* 拖的是右下角：往下 = 拉角出去 = 变大 */
+    const dy = yOf(e) - zoomDrag.anchorY;
+    if (!zoomDrag.moved && Math.abs(dy) < 2) return;
+    zoomDrag.moved = true;
+    e.preventDefault();
+    const raw = zoomDrag.startScale * Math.exp(dy / 220);
+    const target = Math.min(zoomDrag.ceiling, Math.max(MIN_SCALE, raw));
+    zoomDrag.target = target;
+    pendingScale = target;
+    paintZoomBadge(target);
+    scheduleResizeRequest();
+});
+
+function endZoomDrag(e) {
+    if (!zoomDrag) return;
+    const moved = zoomDrag.moved;
+    const finalScale = zoomDrag.target;
+    zoomDrag = null;
+    pendingScale = null;
+    document.body.classList.remove('dragging-zoom');
+    if (rafId) { cancelAnimationFrame(rafId); rafId = 0; }
+    try { $('zoomer').releasePointerCapture(e.pointerId); } catch (_) {}
+    if (moved) {
+        dragEndedAt = performance.now();
+        if (Math.abs(finalScale - lastSent) >= 0.004) {
+            lastSent = finalScale;
+            requestWindowScale(finalScale);
+        }
+        holdScale = finalScale;
+        paintZoomBadge(finalScale);
+        return;
+    }
+    paintZoomBadge();
+}
+$('zoomer').addEventListener('pointerup', endZoomDrag);
+$('zoomer').addEventListener('pointercancel', endZoomDrag);
+
+/* 双击回 100%（= BASE，即默认尺寸）；刚拖完 400ms 内忽略 */
+$('zoomer').addEventListener('dblclick', e => {
+    e.preventDefault();
+    if (performance.now() - dragEndedAt < 400) return;
+    lastSent = BASE;
+    holdScale = BASE;
+    requestWindowScale(BASE);
+    paintZoomBadge(BASE);
+});
+
+/* ---------------- 拖拽期间禁止选中文字 ---------------- */
+for (const ev of ['selectstart', 'dragstart']) {
+    document.addEventListener(ev, e => {
+        /* 输入框里必须允许选中文本，否则没法改数值 */
+        if (e.target && e.target.closest && e.target.closest('input')) return;
+        if (document.body.classList.contains('dragging') ||
+            document.body.classList.contains('dragging-zoom') || wetDrag) {
+            e.preventDefault();
+        }
+    });
+}
+
+window.addEventListener('blur', () => {
+    wetDrag = null;
+    draggingKeys.clear();
+    dragCount = 0;
+    document.body.classList.remove('dragging');
+    document.body.classList.remove('dragging-zoom');
+});
+
+/* ---------------- 启动 ---------------- */
+ROW1.forEach(k => buildKnob(k, $('krow1')));
+ROW2.forEach(k => buildKnob(k, $('krow2')));
+
+paintAll();
+paintWet();
+paintSwitches();
+paintPad(0.5, 0.68, 0.46);
+buildDbScales();
+setMeter('mtrL', 'capL', 0);
+setMeter('mtrR', 'capR', 0);
+
+new ResizeObserver(fitToViewport).observe(document.documentElement);
+addEventListener('resize', fitToViewport);
+paintZoomBadge();
+lastSent = viewScale();
+
+Cabbage.sendCustomCommand('cabbageIsReadyToLoad');
+/* ---------------- 内置使用手册 ----------------
+   顶栏 ? 在 iframe 里打开 help.html。只用内嵌：WebView 里 window.open 是死按钮。 */
+import('./help-ui.js').then(({ attachHelp }) => attachHelp())
+    .catch(e => console.warn('Cabbage: 手册模块不可用 —', e));
+</script>
+</body>
+</html>

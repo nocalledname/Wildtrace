@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Cab3-Depth-Lissajous · 使用手册</title>
+<style>:root {
+    --fg: #f3f3f3;
+    --dim: rgba(255, 255, 255, .70);
+    --faint: rgba(255, 255, 255, .42);
+    --hair: rgba(255, 255, 255, .12);
+    --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body {
+    background: #000;
+    color: var(--fg);
+    font-family: -apple-system, "Helvetica Neue", "PingFang SC", Arial, sans-serif;
+    font-size: 11px;
+    line-height: 1.68;
+    -webkit-font-smoothing: antialiased;
+}
+body { padding: 16px 14px 38px; max-width: 760px; margin: 0 auto; }
+::-webkit-scrollbar { width: 4px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, .16); border-radius: 2px; }
+::-webkit-scrollbar-thumb:hover { background: rgba(255, 255, 255, .32); }
+
+h1 {
+    font-size: 13px;
+    font-weight: 500;
+    letter-spacing: .26em;
+    text-transform: uppercase;
+}
+.sub {
+    margin-top: 4px;
+    font-family: var(--mono);
+    font-size: 8.5px;
+    letter-spacing: .16em;
+    text-transform: uppercase;
+    color: var(--faint);
+}
+h2 {
+    margin: 20px 0 6px;
+    font-size: 9px;
+    font-weight: 500;
+    letter-spacing: .22em;
+    text-transform: uppercase;
+    color: rgba(255, 255, 255, .55);
+    padding-bottom: 4px;
+    border-bottom: 1px solid var(--hair);
+}
+h3 {
+    margin: 13px 0 2px;
+    font-family: var(--mono);
+    font-size: 8.5px;
+    font-weight: 500;
+    letter-spacing: .16em;
+    text-transform: uppercase;
+    color: rgba(255, 255, 255, .38);
+}
+h3:first-of-type { margin-top: 6px; }
+
+ul { padding-left: 15px; }
+li { color: var(--dim); margin: 1px 0; }
+li b { color: #fff; font-weight: 500; }
+
+table { width: 100%; border-collapse: collapse; }
+td {
+    padding: 3px 0;
+    vertical-align: top;
+    color: var(--dim);
+    font-size: 10.5px;
+}
+td:first-child {
+    width: 96px;
+    padding-right: 10px;
+    font-family: var(--mono);
+    font-size: 8.5px;
+    letter-spacing: .04em;
+    color: rgba(255, 255, 255, .88);
+    white-space: nowrap;
+}
+
+.k { padding: 7px 0 8px; border-bottom: 1px solid rgba(255, 255, 255, .065); }
+.k:last-child { border-bottom: 0; }
+.k .head { display: flex; align-items: baseline; gap: 8px; }
+.k .name { font-size: 10.5px; font-weight: 600; letter-spacing: .01em; }
+.k .ch {
+    font-family: var(--mono);
+    font-size: 8.5px;
+    letter-spacing: .02em;
+    color: rgba(255, 255, 255, .34);
+}
+.k .range {
+    margin-left: auto;
+    font-family: var(--mono);
+    font-size: 8.5px;
+    letter-spacing: .02em;
+    color: rgba(255, 255, 255, .44);
+    text-align: right;
+    white-space: nowrap;
+}
+.k .desc { margin-top: 2px; color: var(--dim); font-size: 10.5px; line-height: 1.62; }
+.k .desc code {
+    font-family: var(--mono);
+    font-size: 9.5px;
+    color: rgba(255, 255, 255, .90);
+}
+
+.note {
+    margin-top: 8px;
+    padding: 8px 10px;
+    border-left: 2px solid rgba(255, 255, 255, .20);
+    background: rgba(255, 255, 255, .035);
+    color: rgba(255, 255, 255, .68);
+    font-size: 10px;
+    line-height: 1.66;
+}
+.note b { color: #fff; font-weight: 600; }</style>
+</head>
+<body>
+<h1>LISSAJOUS</h1>
+<div class="sub">Depth Render · Cab3-Depth-Lissajous</div>
+
+<h2>快速上手</h2>
+<table>
+<tr><td>无需摆位</td><td>位置由插件自己走（轨迹是算法生成的），没有可拖拽的点；你调的是「它怎么走」。</td></tr>
+<tr><td>数值框</td><td>点击进入编辑，<code>Enter</code> 提交、<code>Esc</code> 取消。双击数值框回默认值。</td></tr>
+<tr><td>旋钮 / 推子</td><td>旋钮上下拖；横向推子左右拖、纵向推子上下拖。按住 <code>Shift</code> 精调。双击回默认值。</td></tr>
+<tr><td>Wet Send</td><td>两个滑柄分别拖混响发送的下限 / 上限，不能交叉。</td></tr>
+<tr><td>右下角三角</td><td>拖动改窗口大小，双击回到 100%。</td></tr>
+<tr><td>顶栏 ?</td><td>打开本手册。</td></tr>
+</table>
+
+<h2>旋钮与推子</h2>
+<h3>X / Y 轴源</h3>
+<div class="k"><div class="head"><span class="name">X 源</span><span class="ch">xsrc</span><span class="range">0 – 3 · 默认 0</span></div><div class="desc"><code>0</code> = SIN 合成轴，<code>1</code> = 输入 L，<code>2</code> = 输入 R，<code>3</code> = 输入 M。选输入时图形不再解析可预测，画面改用荧光点云累积。</div></div>
+<div class="k"><div class="head"><span class="name">Y 源</span><span class="ch">ysrc</span><span class="range">0 – 3 · 默认 0</span></div><div class="desc">同上。X 与 Y 都选 SIN 时是标准李萨如图；任一侧选输入就变成「输入波形对合成轴 / 输入对输入」的示波器。</div></div>
+<div class="k"><div class="head"><span class="name">Wave</span><span class="ch">wave</span><span class="range">0 – 3 · 默认 0</span></div><div class="desc">合成轴波形：<code>0</code> sine、<code>1</code> triangle、<code>2</code> saw、<code>3</code> square。两侧共用。</div></div>
+<h3>Figure</h3>
+<div class="k"><div class="head"><span class="name">Rate</span><span class="ch">rate</span><span class="range">0.02 – 4 · 默认 0.40</span></div><div class="desc">相位推进速度（x 周期 / 秒）。越高光点跑得越快。</div></div>
+<div class="k"><div class="head"><span class="name">Ratio</span><span class="ch">ratio</span><span class="range">1 – 8 · 默认 2.000</span></div><div class="desc">y 与 x 的周期比，量化到 1/8（<code>round(ratio×8)/8</code>）。相位每绕回 8 个 x 周期才归零，而 8 × (n/8) 必为整数 —— 所以<b>任意取值都严格闭合</b>，绕回处不会出现台阶。</div></div>
+<div class="k"><div class="head"><span class="name">Phase °</span><span class="ch">phase</span><span class="range">0 – 360 · 默认 90</span></div><div class="desc">x 轴的相位偏移（度），只加在 x 上，因此等效于 x / y 的相位差。它和 Ratio 一起决定闭合曲线的形状：某些比（如 2）改变相位只换走向不换形状，另一些比（如 3）会连续变形出不同图形。360° 与 0° 等价。</div></div>
+<div class="k"><div class="head"><span class="name">Scale</span><span class="ch">scale</span><span class="range">0.05 – 1 · 默认 0.800</span></div><div class="desc">图形振幅。为保证不越出圆盘，振幅再乘 1/√2，<code>1.0</code> 时曲线正好贴到圆盘的内接正方形。</div></div>
+<h3>Motion</h3>
+<div class="k"><div class="head"><span class="name">Chaos</span><span class="ch">chaos</span><span class="range">0 – 0.1 · 默认 0.004</span></div><div class="desc">叠在坐标上的随机微颤幅度，让声音不至于机械。</div></div>
+<div class="k"><div class="head"><span class="name">Glide</span><span class="ch">glide</span><span class="range">0.001 – 0.4 · 默认 0.020</span></div><div class="desc">Rate / Phase / Scale 的一阶平滑时间常数（秒）。越大参数变化越柔。</div></div>
+<div class="k"><div class="head"><span class="name">In Gain</span><span class="ch">inGain</span><span class="range">0.1 – 16 · 默认 2.00</span></div><div class="desc">输入轴模式下的输入增益。</div></div>
+<h3>Space</h3>
+<div class="k"><div class="head"><span class="name">Room</span><span class="ch">roomSize</span><span class="range">10 – 100 · 默认 50</span></div><div class="desc">空间尺寸。延迟基准 = <code>0.1 ms + 距离 × Room</code>，混响反馈 = <code>0.10 + (Room−10)/90 × 0.80</code>（10 → 0.10，100 → 0.90）。越大越空旷、尾巴越长。</div></div>
+<div class="k"><div class="head"><span class="name">Cutoff</span><span class="ch">cutoff</span><span class="range">1000 – 16000 · 默认 16000</span></div><div class="desc">混响的高频吸收。越低尾巴越暗。</div></div>
+<div class="k"><div class="head"><span class="name">Master Gain</span><span class="ch">masterGain</span><span class="range">0 – 8 · 默认 2.00</span></div><div class="desc">总输出增益。</div></div>
+<div class="k"><div class="head"><span class="name">Wet Send Min / Max</span><span class="ch">minWet / maxWet</span><span class="range">0 – 1 · 默认 0.10 / 0.35</span></div><div class="desc">最近处 / 最远处的混响发送量，中间按深度线性插值。<b>发送量还会再乘一次距离衰减</b>，所以远端混响跟着干声一起变小，不会越远越糊。</div></div>
+
+
+<div class="note"><b>Depth 渲染：</b>输出左右两路立体声。距离从<b>底边中央</b>起算：pad 底部最近、顶部最远。</div>
+
+<div class="note"><b>音量与混响的安全余量：</b>本插件的信号链内部留了 6 dB 余量（干声与混响发送各减半），末端还有一道软膝限幅（0.85 以下完全线性）。但把 <b>Master Gain</b> 推到很高、同时把 <b>Wet Send Max</b> 也拉满时，仍可能顶到限幅器的压缩区 —— 听感上是轻微的「滋滋」或发毛。遇到这种情况，先把 Master 退回 4–6，再用 Wet Send 补混响量，不要两边同时拉满。</div>
+</body>
+</html>

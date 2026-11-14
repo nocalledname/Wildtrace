@@ -1,0 +1,2089 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Cab3-HRTF-Boids</title>
+<style>
+    :root {
+        /* 天蓝色系：从参考图取样后压低一档，让白字有 5:1 以上对比度 */
+        --sky-hi: #2f9bd4;
+        --sky-mid: #1477b0;
+        --sky-lo: #0a4e7c;
+        --sky-deep: #063a5e;
+        --ink: #05192b;
+        --ink-2: #0a2a45;
+        --paper: #ffffff;
+        --red: #ff3b40;
+        --coral: #f4555a;
+        --coral-soft: rgba(244, 85, 90, .30);
+        --foam: #cfeeff;
+        --mono: "SF Mono", "JetBrains Mono", "Consolas", "Menlo", monospace;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    html, body {
+        width: 100%;
+        height: 100%;
+        overflow: hidden;
+        background: var(--sky-deep);
+    }
+    body {
+        --zoom: 1;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        position: relative;
+    }
+
+    /* .canvas 是 620x760 的设计稿，整体靠 --zoom 缩放 */
+    .canvas {
+        width: 620px;
+        height: 760px;
+        flex: none;
+        transform: scale(var(--zoom));
+        transform-origin: center center;
+        /* 把整块画布提升为独立合成层。
+           画布被 transform 缩放，里面的云/鸟又在动 —— 不加这条时 Chromium
+           每帧都要把整块 620×760 重新光栅化（实测 18.4% → 15.6%，−2.8 单核点）。 */
+        will-change: transform;
+        position: relative;
+        overflow: hidden;
+        color: var(--paper);
+        font-family: -apple-system, "Helvetica Neue", "PingFang SC", Arial, sans-serif;
+        font-size: 10px;
+        background:
+            radial-gradient(120% 90% at 50% 8%, var(--sky-hi) 0%, var(--sky-mid) 38%, var(--sky-lo) 72%, var(--sky-deep) 100%);
+        user-select: none;
+        -webkit-user-select: none;
+    }
+    .canvas.dragging-zoom { cursor: nwse-resize; }
+
+    #scene {
+        position: absolute;
+        inset: 0;
+        width: 620px;
+        height: 760px;
+        display: block;
+    }
+
+    /* ================= 页眉 ================= */
+    .hdr {
+        position: absolute;
+        left: 20px; right: 18px; top: 13px;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        pointer-events: none;
+        z-index: 4;
+    }
+    .hdr .mark { display: block; width: 13px; height: 13px; flex: none; }
+    .hdr .mark .ring { fill: none; stroke: rgba(255, 255, 255, .80); stroke-width: 1; }
+    .hdr .mark .core { fill: var(--coral); }
+    .hdr h1 {
+        font-size: 13px;
+        font-weight: 600;
+        letter-spacing: .42em;
+        line-height: 1;
+        white-space: nowrap;
+    }
+    .hdr .sub {
+        font-family: var(--mono);
+        font-size: 7px;
+        letter-spacing: .22em;
+        text-transform: uppercase;
+        color: rgba(255, 255, 255, .84);
+        padding-top: 2px;
+        white-space: nowrap;
+    }
+
+    /* 顶栏右侧的标签位：文字已删，留空容器把 CAMERA 与 ? 推到右边 */
+    .hdr .tag {
+        margin-left: auto;
+        font-family: var(--mono);
+        font-size: 7px;
+        letter-spacing: .12em;
+        color: rgba(255, 255, 255, .95);
+        white-space: nowrap;
+    }
+
+    /* ================= 场景里的 X / Y 推子 ================= */
+    .xy { position: absolute; z-index: 5; }
+    .xylab {
+        position: absolute;
+        font-family: var(--mono);
+        font-size: 6.5px;
+        letter-spacing: .16em;
+        color: var(--paper);
+        text-transform: uppercase;
+        white-space: nowrap;
+    }
+    .xyval {
+        position: absolute;
+        font-family: var(--mono);
+        font-size: 6.5px;
+        letter-spacing: .06em;
+        color: var(--paper);
+    }
+    .xy.h { left: 146px; top: 42px; width: 320px; height: 16px; }
+    .xy.h .xylab { left: 0; top: -11px; }
+    .xy.h .xyval { right: 0; top: -11px; }
+    .xy.v { left: 110px; top: 64px; width: 18px; height: 320px; }
+    .xy.v .xylab { left: -52px; top: -12px; }
+    .xy.v .xyval { left: 0; bottom: -13px; }
+
+    .htrack, .vtrack { position: absolute; touch-action: none; }
+    .htrack {
+        left: 0; right: 0; top: 50%;
+        height: 16px; margin-top: -8px;
+        cursor: ew-resize;
+    }
+    .htrack::before {
+        content: "";
+        position: absolute;
+        left: 0; right: 0; top: 50%;
+        height: 2px; margin-top: -1px;
+        background: rgba(4, 26, 44, .48);
+    }
+    .htrack::after {
+        content: "";
+        position: absolute;
+        left: 0; right: 0; top: 50%;
+        height: 9px; margin-top: -4.5px;
+        background: repeating-linear-gradient(90deg,
+            rgba(255, 255, 255, .26) 0 1px, transparent 1px 10%);
+        pointer-events: none;
+    }
+    .vtrack {
+        left: 50%; top: 0; bottom: 0;
+        width: 16px; margin-left: -8px;
+        cursor: ns-resize;
+    }
+    .vtrack::before {
+        content: "";
+        position: absolute;
+        top: 0; bottom: 0; left: 50%;
+        width: 2px; margin-left: -1px;
+        background: rgba(4, 26, 44, .48);
+    }
+    .vtrack::after {
+        content: "";
+        position: absolute;
+        top: 0; bottom: 0; left: 50%;
+        width: 9px; margin-left: -4.5px;
+        background: repeating-linear-gradient(180deg,
+            rgba(255, 255, 255, .26) 0 1px, transparent 1px 10%);
+        pointer-events: none;
+    }
+    .ffill {
+        position: absolute;
+        left: 0; top: 50%;
+        height: 2px; margin-top: -1px;
+        background: linear-gradient(to right, var(--coral-soft), var(--coral));
+        pointer-events: none;
+    }
+    .fbar {
+        position: absolute;
+        top: 50%;
+        width: 3px; height: 15px;
+        margin-top: -7.5px; margin-left: -1.5px;
+        background: #ffffff;
+        box-shadow: 0 0 7px rgba(255, 255, 255, .65);
+        pointer-events: none;
+    }
+    .vfill {
+        position: absolute;
+        left: 50%; bottom: 0;
+        width: 2px; margin-left: -1px;
+        background: linear-gradient(to top, var(--coral-soft), var(--coral));
+        pointer-events: none;
+    }
+    .vbar {
+        position: absolute;
+        left: 50%;
+        width: 15px; height: 3px;
+        margin-left: -7.5px; margin-top: -1.5px;
+        background: #ffffff;
+        box-shadow: 0 0 7px rgba(255, 255, 255, .65);
+        pointer-events: none;
+    }
+
+    /* ================= 电平表 ================= */
+    .metercol {
+        position: absolute;
+        top: 74px;
+        display: flex;
+        flex-direction: column;
+        gap: 5px;
+        z-index: 4;
+        pointer-events: none;
+    }
+    .metercol.l { left: 486px; align-items: flex-start; }
+    .metercol.r { right: 18px; align-items: flex-end; }
+    .metercol > span {
+        height: 8px;
+        font-family: var(--mono);
+        font-size: 6.5px;
+        line-height: 8px;
+        letter-spacing: .18em;
+        color: var(--paper);
+    }
+    .meterbody { display: flex; align-items: stretch; gap: 3px; }
+    .meterbody.mirror { flex-direction: row-reverse; }
+
+    .bar { position: relative; width: 10px; height: 280px; flex: none; background: rgba(4, 20, 34, .58); }
+    .bar::before, .bar::after {
+        content: "";
+        position: absolute;
+        top: 0; bottom: 0;
+        width: 1px;
+        background: rgba(255, 255, 255, .26);
+    }
+    .bar::before { left: 0; }
+    .bar::after { right: 0; }
+    .bar i {
+        position: absolute;
+        left: 1px; right: 1px; bottom: 0;
+        height: 100%;
+        transform-origin: bottom center;
+        transform: scaleY(0);
+        background: linear-gradient(to top,
+            rgba(255, 255, 255, .28) 0%,
+            rgba(255, 255, 255, .74) 55%,
+            #ffffff 100%);
+        transition: transform .05s linear;
+        will-change: transform;
+    }
+    .bar b {
+        position: absolute;
+        left: 0; right: 0;
+        height: 1px;
+        bottom: 0;
+        background: var(--coral);
+        transition: transform .05s linear, opacity .12s linear;
+        opacity: 0;
+        will-change: transform;
+    }
+
+    .dbscale { position: relative; width: 24px; height: 280px; flex: none; }
+    .dbscale .t { position: absolute; left: 0; right: 0; height: 0; }
+    .dbscale .t::before {
+        content: "";
+        position: absolute;
+        left: 0; top: 0;
+        width: 3px; height: 1px;
+        background: rgba(255, 255, 255, .40);
+    }
+    .dbscale .t.major::before { width: 6px; background: rgba(255, 255, 255, .72); }
+    .dbscale .t .n {
+        position: absolute;
+        right: 0; top: -3.4px;
+        font-family: var(--mono);
+        font-size: 6px; line-height: 1;
+        color: rgba(255, 255, 255, .86);
+    }
+    .dbscale .t.major .n { color: #ffffff; }
+    .dbscale .t.zero .n { color: #ffe0e1; }
+    .meterbody.mirror .dbscale .t::before { left: auto; right: 0; }
+    .meterbody.mirror .dbscale .t .n { right: auto; left: 0; }
+
+    /* ================= 控制台 ================= */
+    .deck {
+        position: absolute;
+        left: 0; right: 0; bottom: 0;
+        height: 344px;
+        padding: 9px 18px 7px;
+        display: flex;
+        flex-direction: column;
+        background:
+            linear-gradient(to bottom, rgba(6, 26, 44, 0) 0%, rgba(6, 26, 44, .82) 7%, rgba(5, 22, 38, .95) 26%, rgba(4, 20, 35, .97) 100%);
+        border-top: 1px solid rgba(207, 238, 255, .22);
+        z-index: 6;
+    }
+
+    .sec { flex: none; }
+    .sec + .sec { margin-top: 4px; }
+
+    .sh {
+        display: flex;
+        align-items: center;
+        gap: 7px;
+        height: 16px;
+        font-family: var(--mono);
+        font-size: 7px;
+        letter-spacing: .24em;
+        text-transform: uppercase;
+        color: rgba(255, 255, 255, .92);
+    }
+    .sh b { color: var(--coral); font-weight: 600; letter-spacing: .10em; }
+    .sh i { flex: 1; height: 1px; background: rgba(207, 238, 255, .26); }
+
+    /* ================= 旋钮（原版 Boids 就是 rslider，这里恢复成旋钮） =================
+       每个旋钮 = plate + 11 根刻度 + 底弧（270°）+ 值弧 + 指针 + 中央数值框。
+       参数名一律纯白，单位/说明才降级。 */
+    .band { display: flex; gap: 20px; align-items: flex-start; }
+    .grp { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+    .grp.wide { flex: 2.15; }
+
+    .krow { display: flex; align-items: center; gap: 4px; height: 74px; }
+
+    .knob {
+        position: relative;
+        flex: 1;
+        min-width: 0;
+        height: 74px;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: flex-start;
+        cursor: ns-resize;
+        touch-action: none;
+    }
+    .knob svg { width: 60px; height: 60px; display: block; flex: none; }
+    .knob.sm svg { width: 48px; height: 48px; }
+    .knob.sm { height: 66px; }
+
+    .knob .plate { fill: rgba(3, 22, 39, .55); stroke: rgba(207, 238, 255, .24); stroke-width: 1; }
+    .knob .tick { stroke: rgba(207, 238, 255, .30); stroke-width: 1; }
+    .knob .gauge { fill: none; stroke: rgba(207, 238, 255, .17); stroke-width: 2.5; stroke-linecap: round; }
+    .knob .arc {
+        fill: none;
+        stroke: var(--red);
+        stroke-width: 2.5;
+        stroke-linecap: round;
+    }
+    .knob .ptr { stroke: #ffffff; stroke-width: 2; stroke-linecap: round; }
+    .knob:hover .plate { stroke: rgba(207, 238, 255, .48); }
+    .knob.editing { cursor: text; }
+
+    .kval {
+        position: absolute;
+        left: 50%;
+        top: 30px;
+        transform: translate(-50%, -50%);
+        width: 46px;
+        padding: 0;
+        border: 0;
+        border-radius: 2px;
+        background: transparent;
+        color: #ffffff;
+        font-family: var(--mono);
+        font-size: 9px;
+        font-weight: 400;
+        letter-spacing: .01em;
+        text-align: center;
+        outline: none;
+        pointer-events: none;
+        -webkit-user-select: text;
+        user-select: text;
+        -webkit-appearance: none;
+        appearance: none;
+    }
+    .knob.sm .kval { top: 24px; font-size: 8px; width: 40px; }
+    .knob.editing .kval {
+        pointer-events: auto;
+        background: rgba(255, 59, 64, .18);
+        box-shadow: 0 0 0 1px rgba(255, 59, 64, .70);
+    }
+
+    .klab {
+        margin-top: 1px;
+        font-family: var(--mono);
+        font-size: 6.5px;
+        line-height: 9px;
+        letter-spacing: .12em;
+        text-transform: uppercase;
+        color: #ffffff;
+        white-space: nowrap;
+        text-align: center;
+    }
+    .knob.sm .klab { font-size: 6px; letter-spacing: .06em; }
+
+    /* 变调 7 联：小旋钮 + 珊瑚色编号 */
+    .pnum {
+        font-family: var(--mono);
+        font-size: 7px;
+        font-weight: 600;
+        letter-spacing: .10em;
+        color: var(--red);
+        line-height: 9px;
+    }
+
+    /* ---- 湿声双滑块（塞进旋钮行里，整体垂直居中）---- */
+    .wetbox { flex: 1.6; min-width: 96px; display: flex; flex-direction: column; gap: 4px; padding-top: 22px; }
+    .wethead { display: flex; justify-content: space-between; align-items: baseline; }
+    .wetlab {
+        font-family: var(--mono);
+        font-size: 6.5px;
+        letter-spacing: .12em;
+        text-transform: uppercase;
+        color: #ffffff;
+        white-space: nowrap;
+    }
+    .wetunit {
+        font-family: var(--mono);
+        font-size: 6px;
+        letter-spacing: .10em;
+        text-transform: uppercase;
+        color: rgba(255, 255, 255, .72);
+    }
+    .wetline { display: flex; align-items: center; gap: 6px; }
+    .dual { position: relative; flex: 1; height: 18px; min-width: 40px; }
+    .dual .ticks {
+        position: absolute;
+        left: 0; right: 0; top: 50%;
+        height: 9px; margin-top: -4.5px;
+        background: repeating-linear-gradient(90deg,
+            rgba(207, 238, 255, .17) 0 1px, transparent 1px 10%);
+        pointer-events: none;
+    }
+    .dual .track {
+        position: absolute;
+        left: 0; right: 0; top: 50%;
+        height: 2px; margin-top: -1px;
+        background: rgba(207, 238, 255, .22);
+    }
+    .dual .fill {
+        position: absolute;
+        top: 50%;
+        height: 2px; margin-top: -1px;
+        background: linear-gradient(to right, rgba(244, 85, 90, .55), var(--coral));
+    }
+    .dual .thumb {
+        position: absolute;
+        top: 50%;
+        width: 9px; height: 9px;
+        margin-top: -4.5px; margin-left: -4.5px;
+        border-radius: 50%;
+        background: #ffffff;
+        box-shadow: 0 0 7px rgba(244, 85, 90, .65);
+        cursor: ew-resize;
+        touch-action: none;
+    }
+    .wetvals { flex: none; display: flex; gap: 2px; }
+    .wetvals input {
+        width: 40px;
+        padding: 1px 2px;
+        border: 0; border-radius: 2px;
+        background: transparent;
+        color: var(--paper);
+        font-family: var(--mono);
+        font-size: 7.5px;
+        text-align: right;
+        outline: none;
+        -webkit-user-select: text;
+        user-select: text;
+        -webkit-appearance: none;
+        appearance: none;
+    }
+    .wetvals input:focus { background: rgba(244, 85, 90, .20); box-shadow: 0 0 0 1px rgba(244, 85, 90, .8); }
+
+    .foot {
+        margin-top: auto;
+        padding-top: 5px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        font-family: var(--mono);
+        font-size: 6.5px;
+        letter-spacing: .24em;
+        text-transform: uppercase;
+        color: rgba(207, 238, 255, .80);
+    }
+    .foot .cell { letter-spacing: .12em; color: var(--paper); }
+
+    /* ---- 缩放三角 ---- */
+    .zoomer {
+        position: absolute;
+        right: 0; bottom: 0;
+        width: 34px; height: 34px;
+        padding: 0;
+        border: 0;
+        background: transparent;
+        cursor: nwse-resize;
+        touch-action: none;
+        z-index: 9;
+        -webkit-appearance: none;
+        appearance: none;
+    }
+    .zoomer svg { display: block; width: 34px; height: 34px; }
+    .zoomer .tri { fill: rgba(255, 255, 255, .16); }
+    .zoomer:hover .tri { fill: rgba(255, 255, 255, .30); }
+    .zoomer .zpct {
+        position: absolute;
+        right: 4px; bottom: 3px;
+        font-family: var(--mono);
+        font-size: 6px;
+        color: rgba(255, 255, 255, .0);
+        transition: color .12s ease;
+    }
+    .zoomer:hover .zpct { color: rgba(255, 255, 255, .95); }
+    body.dragging-zoom .zoomer .zpct { color: rgba(255, 255, 255, .95); }
+
+    /* ================= 场景元素 ================= */
+    /* pad 底色 .48 → .60：云会从 pad **后面**飘过（绘制顺序 cloudsNear → pad），
+       太透时云会透成一块灰"脏斑"；加厚一档就变成"玻璃后面的雾"，同时抬高于鸟的对比。 */
+    .padfill { fill: rgba(3, 22, 39, .60); }
+    .padframe { fill: none; stroke: rgba(207, 238, 255, .55); stroke-width: 1; }
+    .padgrid { stroke: rgba(207, 238, 255, .22); stroke-width: 1; }
+    .padring { fill: none; stroke: rgba(207, 238, 255, .20); stroke-width: 1; stroke-dasharray: 3 5; }
+    .padtick { stroke: rgba(207, 238, 255, .38); stroke-width: 1; }
+
+    .bird path {
+        fill: none;
+        stroke-linecap: round;
+        stroke-linejoin: round;
+    }
+    .bird path { stroke: #ffffff; }
+    .bird .bodyln { stroke-width: 0.9; opacity: .75; }
+    .bird.follower path { stroke: #ffffff; stroke-width: 1.7; }
+    .bird.follower .bodyln { stroke-width: 0.9; }
+    .bird.leader path { stroke: #ff3b40; stroke-width: 2.1; }
+    .bird.leader .bodyln { stroke-width: 1.2; opacity: .9; }
+    /* 头鸟不再套光环：一个圆环在小尺寸下会和翅膀糊成「一个圈加一条线」。
+       红色 + 略粗的笔画 + 一圈柔和外发光已经够醒目 */
+    .bird.leader { filter: drop-shadow(0 0 3px rgba(255, 59, 64, .75)); }
+    /* 尾迹只表达「这一刻飞多快、朝哪」—— 速度是真实的速度，
+       不是拿别的参数冒充几何（§6.17 的判据），而且长度上限 16px 不会拖成一条线 */
+
+    .amb path { fill: none; stroke: rgba(7, 40, 66, .72); stroke-width: 1.1; stroke-linecap: round; }
+
+    /* 远景鸟：从下往上，穿过云层。
+       字形机头朝 -Y，所以航向朝上就是 rotate(0)，不需要再转。 */
+    @keyframes ambrise {
+        from { transform: translateY(880px) translateX(0); opacity: 0; }
+        6%   { opacity: var(--op, .8); }
+        92%  { opacity: var(--op, .8); }
+        to   { transform: translateY(-160px) translateX(var(--dx, 0px)); opacity: 0; }
+    }
+    .ambrun {
+        animation-name: ambrise;
+        animation-timing-function: linear;
+        animation-iteration-count: infinite;
+        will-change: transform;
+    }
+
+    /* ===== 云：三层独立动画 =====
+       1) drift   —— 外层整体横移（云的"走向"）
+       2) breath  —— 中层缩放 + 透明度呼吸（聚散）
+       3) litdrift—— 亮顶相对暗底缓慢滑动（光线流动，看起来在"变"）
+       三层周期互质（不是整数倍），所以永远不重复同一形状。 */
+    /* 云**从上往下**，与上升的鸟迎面相撞 —— 反向运动才有"穿越"的感觉。
+       横向只给一点摆动，否则像电梯。
+       ★ 位置全部由动画给（--x0/--y0 → --x1/--y1 是**绝对坐标**）：
+         云体本身建在原点，这样"在画面上"和"在画布外"只由一条时间轴决定，
+         不会再出现"某几朵忘了动、堆在角落"的情况。 */
+    @keyframes cloudDrift {
+        from { transform: translate3d(var(--x0, 0px),    var(--y0, -260px), 0); }
+        to   { transform: translate3d(var(--x1, 0px),    var(--y1, 980px),  0); }
+    }
+    @keyframes cloudBreath {
+        0%   { transform: scale(.84);  opacity: calc(var(--op, .5) * .72); }
+        30%  { transform: scale(1.04); opacity: var(--op, .5); }
+        55%  { transform: scale(1.14); opacity: calc(var(--op, .5) * .96); }
+        78%  { transform: scale(.96);  opacity: calc(var(--op, .5) * .84); }
+        100% { transform: scale(.84);  opacity: calc(var(--op, .5) * .72); }
+    }
+    @keyframes litDrift {
+        0%   { transform: translate(-6px, 3px); }
+        50%  { transform: translate(7px, -4px); }
+        100% { transform: translate(-6px, 3px); }
+    }
+
+    .clouddrift {
+        animation-name: cloudDrift;
+        animation-timing-function: linear;
+        animation-iteration-count: infinite;
+        will-change: transform;
+    }
+    .cloudbreath {
+        animation-name: cloudBreath;
+        animation-timing-function: ease-in-out;
+        animation-iteration-count: infinite;
+        transform-origin: center;
+        transform-box: fill-box;
+        will-change: transform, opacity;
+    }
+    .litdrift {
+        animation-name: litDrift;
+        animation-timing-function: ease-in-out;
+        animation-iteration-count: infinite;
+        will-change: transform;
+    }
+</style>
+</head>
+<body>
+
+<div class="canvas" id="canvas">
+
+    <svg id="scene" viewBox="0 0 620 760" aria-hidden="true">
+        <defs>
+            <radialGradient id="skyGlow" cx="50%" cy="6%" r="80%">
+                <stop offset="0%" stop-color="#ffffff" stop-opacity=".16"/>
+                <stop offset="46%" stop-color="#ffffff" stop-opacity=".04"/>
+                <stop offset="100%" stop-color="#ffffff" stop-opacity="0"/>
+            </radialGradient>
+            <radialGradient id="vign" cx="50%" cy="42%" r="72%">
+                <stop offset="0%" stop-color="#000" stop-opacity="0"/>
+                <stop offset="70%" stop-color="#001c30" stop-opacity=".16"/>
+                <stop offset="100%" stop-color="#00131f" stop-opacity=".52"/>
+            </radialGradient>
+            <radialGradient id="padGlow" cx="50%" cy="50%" r="50%">
+                <stop offset="0%" stop-color="#8fd8ff" stop-opacity=".16"/>
+                <stop offset="70%" stop-color="#8fd8ff" stop-opacity=".03"/>
+                <stop offset="100%" stop-color="#8fd8ff" stop-opacity="0"/>
+            </radialGradient>
+            <!-- 云：几团椭圆 + 一层高斯模糊就是卷积云。
+                 模糊半径要够大（stdDeviation 8），小了会看见一朵朵椭圆边。 -->
+            <filter id="cloudBlur" x="-40%" y="-60%" width="180%" height="220%">
+                <feGaussianBlur stdDeviation="9"/>
+            </filter>
+            <filter id="cloudBlurS" x="-40%" y="-60%" width="180%" height="220%">
+                <feGaussianBlur stdDeviation="4.5"/>
+            </filter>
+
+            <!-- 云体的明暗：上亮下暗，才有体积感 -->
+            <linearGradient id="cloudShade" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stop-color="#ffffff" stop-opacity=".95"/>
+                <stop offset="55%" stop-color="#e8f6ff" stop-opacity=".72"/>
+                <stop offset="100%" stop-color="#a8cfe8" stop-opacity=".30"/>
+            </linearGradient>
+
+            <clipPath id="padClip">
+                <rect id="padClipRect" x="146" y="64" width="320" height="320"/>
+            </clipPath>
+        </defs>
+
+        <!-- 天光 -->
+        <rect x="0" y="0" width="620" height="760" fill="url(#skyGlow)"/>
+
+        <!-- 气泡 / 水花（装饰，静态） -->
+        <!-- 云分两层，鸟夹在中间 —— 鸟才会「穿过」云层而不是浮在漆面上 -->
+        <g id="cloudsFar" pointer-events="none"></g>
+
+        <!-- 远处的鸟群（装饰，缓慢横掠） -->
+        <g id="ambient" pointer-events="none"></g>
+        <g id="cloudsNear" pointer-events="none"></g>
+
+        <!-- pad 光晕 -->
+        <circle id="padGlowCircle" cx="306" cy="224" r="210" fill="url(#padGlow)" pointer-events="none"/>
+
+        <!-- pad -->
+        <rect class="padfill" x="146" y="64" width="320" height="320" pointer-events="none"/>
+        <rect class="padframe" x="146" y="64" width="320" height="320" pointer-events="none"/>
+        <g pointer-events="none">
+            <line class="padgrid" x1="306" y1="64" x2="306" y2="384"/>
+            <line class="padgrid" x1="146" y1="224" x2="466" y2="224"/>
+            <circle class="padring" cx="306" cy="224" r="53"/>
+            <circle class="padring" cx="306" cy="224" r="107"/>
+            <circle class="padring" cx="306" cy="224" r="160"/>
+            <line class="padtick" x1="146" y1="64" x2="158" y2="64"/>
+            <line class="padtick" x1="146" y1="64" x2="146" y2="76"/>
+            <line class="padtick" x1="466" y1="64" x2="454" y2="64"/>
+            <line class="padtick" x1="466" y1="64" x2="466" y2="76"/>
+            <line class="padtick" x1="146" y1="384" x2="158" y2="384"/>
+            <line class="padtick" x1="146" y1="384" x2="146" y2="372"/>
+            <line class="padtick" x1="466" y1="384" x2="454" y2="384"/>
+            <line class="padtick" x1="466" y1="384" x2="466" y2="372"/>
+        </g>
+
+        <!-- 鸟群（8 只：1 头 + 7 从），裁剪在 pad 内 -->
+        <g clip-path="url(#padClip)">
+            <g id="flock" pointer-events="none"></g>
+        </g>
+
+        <!-- pad 拖拽热区 -->
+        <rect class="padhit" id="padhit" x="146" y="64" width="320" height="320"
+              fill="transparent" style="cursor: crosshair"/>
+
+        <rect x="0" y="0" width="620" height="760" fill="url(#vign)" pointer-events="none"/>
+    </svg>
+
+    <div class="hdr">
+        <svg class="mark" viewBox="0 0 16 16" fill="none" aria-hidden="true" style="width:13px;height:13px;flex:none;display:block">
+  <g transform="translate(8 8) scale(7.2)" stroke="#ff3b40" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M-1 0.600 C-0.600 0.140 -0.200 0.070 0 -0.040 C0.200 0.070 0.600 0.140 1 0.600" stroke-width="0.167"/>
+    <path d="M0 -0.42 L0 0.46" stroke-width="0.125" opacity=".55"/>
+  </g>
+</svg>
+        <h1>BOIDS</h1>
+        <div class="sub">HRTF Binaural</div>
+        <div class="tag"></div>
+    </div>
+
+    <!-- pad 上方的 X 推子 -->
+    <div class="xy h" id="xyH">
+        <div class="xylab">Position X</div>
+        <div class="xyval" id="xv">0.500</div>
+        <div class="htrack" id="xtrack">
+            <div class="ffill" id="xfill"></div>
+            <div class="fbar" id="xbar"></div>
+        </div>
+    </div>
+
+    <!-- pad 左侧的 Y 推子 -->
+    <div class="xy v" id="xyV">
+        <div class="xylab">Position Y</div>
+        <div class="xyval" id="yv">0.500</div>
+        <div class="vtrack" id="ytrack">
+            <div class="vfill" id="yfill"></div>
+            <div class="vbar" id="ybar"></div>
+        </div>
+    </div>
+
+    <div class="metercol l">
+        <span>L</span>
+        <div class="meterbody">
+            <div class="bar"><i id="mtrL"></i><b id="capL"></b></div>
+            <div class="dbscale" id="scaleL"></div>
+        </div>
+    </div>
+
+    <div class="metercol r">
+        <span>R</span>
+        <div class="meterbody mirror">
+            <div class="bar"><i id="mtrR"></i><b id="capR"></b></div>
+            <div class="dbscale" id="scaleR"></div>
+        </div>
+    </div>
+
+    <div class="deck" id="deck">
+        <div id="groups"></div>
+        <div class="foot">
+            <span>Wildtrace Series</span>
+            <span class="cell" id="footTag">8 BOIDS · 30 Hz</span>
+        </div>
+    </div>
+
+    <button class="zoomer" id="zoomer" type="button" aria-label="拖动缩放界面，双击回到 100%" title="往右下拖变大、往左上拖变小 · 双击回到 100%">
+        <svg viewBox="0 0 34 34" aria-hidden="true">
+            <path class="tri" d="M34 34 L34 12 L12 34 Z"></path>
+        </svg>
+        <span class="zpct" id="zpct">100%</span>
+    </button>
+
+</div>
+
+<script type="module">
+import { Cabbage } from './cabbage/cabbage.js';
+
+const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
+/* 把归一化坐标钳制到圆盘内（圆盘半径 0.5，圆心 0.5,0.5） */
+const clampDisc01 = (x, y) => {
+    const dx = x - 0.5, dy = y - 0.5, d = Math.hypot(dx, dy);
+    if (d <= 0.5 || d === 0) return [x, y];
+    return [0.5 + dx / d * 0.5, 0.5 + dy / d * 0.5];
+};
+const $ = id => document.getElementById(id);
+const NS = 'http://www.w3.org/2000/svg';
+
+/* =========================================================================
+   参数表
+   min / max / def 必须与 CSD 的 <Cabbage> 逐项一致（def = defaultValue，
+   双击归位回到它）。curve 是推子行程 ↔ 参数值的映射：跨数量级的参数必须给，
+   否则常用的低端会挤在轨道的头几个像素里。
+   ========================================================================= */
+const P = {
+    x:           { min: 0,     max: 1,     curve: 0, step: 0.001,  def: 0.5,    fmt: v => v.toFixed(3) },
+    y:           { min: 0,     max: 1,     curve: 0, step: 0.001,  def: 0.5,    fmt: v => v.toFixed(3) },
+    coh:         { min: 0,     max: 1,     curve: 0, step: 0.001,  def: 0,      fmt: v => v.toFixed(3) },
+    ali:         { min: 0,     max: 1,     curve: 0, step: 0.001,  def: 0,      fmt: v => v.toFixed(3) },
+    sep:         { min: 0,     max: 1,     curve: 0, step: 0.001,  def: 1,      fmt: v => v.toFixed(3) },
+    speed:       { min: 0.001, max: 0.1,   curve: 2, step: 0.001,  def: 0.01,   fmt: v => v.toFixed(3) },
+    delay_base:  { min: 10,    max: 1400,  curve: 4, step: 1,      def: 30,     fmt: v => String(Math.round(v)) },
+    feedback:    { min: 0,     max: 0.95,  curve: 0, step: 0.001,  def: 0.4,    fmt: v => v.toFixed(3) },
+    mod_rate:    { min: 0.01,  max: 5,     curve: 3, step: 0.01,   def: 0.5,    fmt: v => v.toFixed(2) },
+    Flock_Decay: { min: 0,     max: 1,     curve: 0, step: 0.0001, def: 0.8209, fmt: v => v.toFixed(4) },
+    m1:          { min: 0,     max: 50,    curve: 2, step: 0.001,  def: 0,      fmt: v => v.toFixed(3) },
+    m2:          { min: 0,     max: 50,    curve: 2, step: 0.001,  def: 0,      fmt: v => v.toFixed(3) },
+    m3:          { min: 0,     max: 50,    curve: 2, step: 0.001,  def: 0,      fmt: v => v.toFixed(3) },
+    m4:          { min: 0,     max: 50,    curve: 2, step: 0.001,  def: 0,      fmt: v => v.toFixed(3) },
+    m5:          { min: 0,     max: 50,    curve: 2, step: 0.001,  def: 0,      fmt: v => v.toFixed(3) },
+    m6:          { min: 0,     max: 50,    curve: 2, step: 0.001,  def: 0,      fmt: v => v.toFixed(3) },
+    m7:          { min: 0,     max: 50,    curve: 2, step: 0.001,  def: 0,      fmt: v => v.toFixed(3) },
+    roomSize:    { min: 10,    max: 100,   curve: 1, step: 0.1,    def: 50,     fmt: v => v.toFixed(1) },
+    cutoff:      { min: 1000,  max: 16000, curve: 3, step: 1,      def: 16000,   fmt: v => String(Math.round(v)) },
+    dry_wet:     { min: 0,     max: 1,     curve: 0, step: 0.001,  def: 0.5,    fmt: v => v.toFixed(3) },
+    vol:         { min: 0,     max: 8,     curve: 0, step: 0.001,  def: 2,      fmt: v => v.toFixed(3) }
+};
+
+const V = {};
+for (const k in P) V[k] = P[k].def;
+
+/* 必须与 CSD 中 automatable:true widget 的书写顺序逐字一致 */
+const PARAM_IDX = ['x', 'y', 'coh', 'ali', 'sep', 'speed',
+                   'delay_base', 'feedback', 'mod_rate', 'Flock_Decay',
+                   'm1', 'm2', 'm3', 'm4', 'm5', 'm6', 'm7',
+                   'minWet', 'maxWet', 'roomSize', 'cutoff', 'dry_wet', 'vol'];
+
+/* 双滑块单独存放（不是一个参数，是一对） */
+const WET = { min: 0.1, max: 0.6 };
+const WET_DEF = { min: 0.1, max: 0.6 };
+
+const FADER_KEYS = Object.keys(P);
+const dragOn = Object.assign(
+    { pad: false, zoom: false, wet: null },
+    Object.fromEntries(FADER_KEYS.map(k => [k, false]))
+);
+
+/* ---------------- 推子行程曲线 ---------------- */
+const CURVE_MAX_K = 12;
+const curveToNorm = (f, k) => {
+    if (!k) return f;
+    const K = Math.min(Math.abs(k), CURVE_MAX_K), A = Math.exp(K) - 1;
+    return k > 0 ? (Math.exp(K * f) - 1) / A
+                 : 1 - (Math.exp(K * (1 - f)) - 1) / A;
+};
+const normToCurve = (n, k) => {
+    if (!k) return n;
+    const K = Math.min(Math.abs(k), CURVE_MAX_K), A = Math.exp(K) - 1;
+    return k > 0 ? Math.log(1 + n * A) / K
+                 : 1 - Math.log(1 + (1 - n) * A) / K;
+};
+const toFrac   = (v, p) => normToCurve(clamp((v - p.min) / (p.max - p.min), 0, 1), p.curve || 0);
+const fromFrac = (f, p) => p.min + (p.max - p.min) * curveToNorm(clamp(f, 0, 1), p.curve || 0);
+
+/* =========================================================================
+   场景几何
+   pad 固定（0..1 坐标系）；鸟的位置是「同一块固定 pad 里的归一化坐标」，
+   参数只能改鸟往哪飞，不能改 pad 尺寸。
+   ========================================================================= */
+const PAD = { x: 146, y: 64, w: 320, h: 320 };
+
+const toScreen = (x, y) => ({
+    x: PAD.x + clamp(x, 0, 1) * PAD.w,
+    y: PAD.y + (1 - clamp(y, 0, 1)) * PAD.h
+});
+
+/* 归一化距离：与 DSP 的 DepthStereoRender 同源，以 (0.5, 0.5) 盘心为参考；
+   圆盘半径 0.5 → 系数 2.0，盘边 = 1.0 */
+function depthOf(x, y) {
+    const dx = x - 0.5, dy = y - 0.5;
+    return clamp(Math.sqrt(dx * dx + dy * dy) * 2.0, 0, 1);
+}
+
+/* =========================================================================
+   鸟群渲染
+   8 只：索引 0 是头鸟（用户控制，珊瑚色），1..7 是跟随（白色）。
+   一只鸟 = 两条二次曲线拼成的「海鸥」字形：
+     翼尖在 (±1, ∓lift)，控制点在 (∓0.45, ctrl)，中点固定在 (0, 0)。
+   lift 由扑翼相位驱动；位置/朝向/景深走 transform，所以每帧只改 16 个属性。
+   ========================================================================= */
+const BIRD_COUNT = 8;
+const FLOCK = [];
+
+/* 一只鸟 = **实心燕形剪影**（俯视）。
+   十条细线在 10px 尺寸下会糊成毛刺；改成闭合填充后，任何角度、任何尺寸都读得出来。
+   机头朝 -Y，翼尖在 ±X，尾部有凹口 —— 这是最省像素又最能认出「鸟」的形状。
+
+   拍翅在俯视里 = 翼尖上下投影移动，所以 lift 只改**翼尖的 Y** 与尾凹深度，
+   横向幅度恒定，形状不会在某一相位塌成一条线。 */
+function birdPath(lift) {
+    /* 回到最初那版「描边海鸥」：两段贝塞尔、端点后掠、翼中段下垂。
+       它好看的原因是**线条有粗细变化**（stroke + round cap），
+       而填色多边形永远是硬边，怎么调都像纸飞机。
+
+       俯视兼容性：把翼中段的「下垂」换成沿机身方向的后掠（-Y 为前方），
+       这样按航向 rotate 时，两只翅膀始终拖在身后 —— 侧视和俯视读起来是同一个形。 */
+    const h = 0.06 + 0.30 * lift;              // 翼中段（前缘）：上扬时更靠前
+    const t = 0.52 - 0.12 * lift;              // 翼尖：强后掠 → 读成 V 形燕子
+    const b = -0.04;                           // 翼根略前于机身中段
+    const f = v => v.toFixed(3);
+    return 'M-1 ' + f(t) +
+           ' C' + f(-0.60) + ' ' + f(-h) + ' ' + f(-0.20) + ' ' + f(-h * 0.50) + ' 0 ' + f(b) +
+           ' C' + f(0.20) + ' ' + f(-h * 0.50) + ' ' + f(0.60) + ' ' + f(-h) + ' 1 ' + f(t);
+}
+
+function svgEl(name, attrs) {
+    const el = document.createElementNS(NS, name);
+    for (const k in attrs) el.setAttribute(k, attrs[k]);
+    return el;
+}
+
+function buildFlock() {
+    const host = $('flock');
+    host.innerHTML = '';
+    for (let i = 0; i < BIRD_COUNT; i++) {
+        const g = svgEl('g', { class: 'bird ' + (i === 0 ? 'leader' : 'follower') });
+        /* 机身线：一条细短线，从喙到尾。有了它，任何航向下都能立刻看出
+           「哪头是头」，否则两只翅膀在斜角度时会连成一条波浪。 */
+        g.appendChild(svgEl('path', {
+            class: 'bodyln', d: 'M0 -0.42 L0 0.46',
+            'vector-effect': 'non-scaling-stroke'
+        }));
+        const path = svgEl('path', {
+            d: birdPath(0),
+            'vector-effect': 'non-scaling-stroke'
+        });
+        g.appendChild(path);
+        host.appendChild(g);
+
+        FLOCK.push({
+            g, path,
+            x: PAD.x + PAD.w * 0.5, y: PAD.y + PAD.h * 0.5,     // 当前（SVG 绝对坐标）
+            tx: PAD.x + PAD.w * 0.5, ty: PAD.y + PAD.h * 0.5,   // 目标
+            px: PAD.x + PAD.w * 0.5, py: PAD.y + PAD.h * 0.5,   // 上一帧
+            vx: 0, vy: 0,
+            phase: (i * 0.77) % (Math.PI * 2),
+            lastD: ''
+        });
+    }
+}
+
+/* 归一化 → SVG 绝对坐标。
+   注意 #flock 这一层没有被 translate 到 pad 原点，所以必须自己加上 PAD.x / PAD.y，
+   否则鸟会全部画在画布左上角、并且被 padClip 裁掉大半。 */
+const padPx = (nx, ny) => {
+    const [cx, cy] = clampDisc01(clamp(nx, 0, 1), clamp(ny, 0, 1));
+    return { x: PAD.x + cx * PAD.w, y: PAD.y + (1 - cy) * PAD.h };
+};
+
+let lastFrame = 0;
+
+function renderFlock(now) {
+    const dt = lastFrame ? Math.min((now - lastFrame) / 1000, 0.05) : 0.016;
+    lastFrame = now;
+
+    for (let i = 0; i < BIRD_COUNT; i++) {
+        const b = FLOCK[i];
+
+        /* --- 位置：向目标插值（后端 30 Hz，这里 60 fps 补平） --- */
+        const k = 0.22;
+        b.px = b.x; b.py = b.y;
+        b.x += (b.tx - b.x) * k;
+        b.y += (b.ty - b.y) * k;
+
+        /* --- 速度：只用于扑翼速率和「没收到航向时的兜底方向」 --- */
+        const dxv = b.x - b.px, dyv = b.y - b.py;
+        b.vx += (dxv - b.vx) * 0.20;
+        b.vy += (dyv - b.vy) * 0.20;
+
+        /* --- 航向：后端角度 → 最短弧插值；没收到后端时用位移方向兜底 --- */
+        const h = HEAD[i];
+        if (h.has && h.tgt != null) {
+            h.cur += shortestArc(h.cur, h.tgt) * 0.20;
+            h.cur = (h.cur + 360) % 360;
+        } else if (Math.hypot(b.vx, b.vy) > 0.05) {
+            h.cur = Math.atan2(b.vy, b.vx) * 180 / Math.PI;
+        }
+
+        /* --- 景深：离盘心 (0.5, 0.5) 越远越小（与 DSP 的距离衰减同源） --- */
+        const nx = (b.x - PAD.x) / PAD.w, ny = 1 - (b.y - PAD.y) / PAD.h;
+        const depth = depthOf(nx, ny);
+        const base = i === 0 ? 13.5 : 12.0;   // 半翼展（px）：单位空间里 1 个单位 = span
+        const span = base * (1 - 0.36 * depth);
+
+        /* --- 扑翼：每只鸟自己的相位与速率 --- */
+        const rate = 2.15 + 0.55 * Math.sin(i * 1.7) + 0.9 * Math.hypot(b.vx, b.vy) * 0.35;
+        b.phase += dt * rate * Math.PI * 2;
+        if (b.phase > Math.PI * 2) b.phase -= Math.PI * 2;
+        const lift = Math.sin(b.phase);
+
+        const d = birdPath(lift);
+        if (d !== b.lastD) { b.path.setAttribute('d', d); b.lastD = d; }
+
+        /* 字形机头朝 -Y（上），所以旋转量取 heading + 90°：
+           rotate(θ+90) 把 (0,-1) 映射到 (cosθ, sinθ)，即正好朝航向。
+           全角度旋转是俯视视角下唯一正确的做法，不再镜像。 */
+        b.g.setAttribute('transform',
+            'translate(' + b.x.toFixed(2) + ' ' + b.y.toFixed(2) + ') ' +
+            'rotate(' + (h.cur + 90).toFixed(2) + ') ' +
+            'scale(' + span.toFixed(3) + ')');
+
+    }
+    requestAnimationFrame(renderFlock);
+}
+
+/* ---------------- 航向（后端 taninv2 算好的角度） ----------------
+   后端推 `bdir`（头鸟）+ `ba1..ba7`（从鸟），单位度，
+   0° = 屏向右、顺时针增加（SVG 的 y 轴向下）。
+   前端按**最短弧**插值，避免 359°→1° 时绕一大圈。 */
+const HEAD = Array.from({ length: 8 }, () => ({ cur: 0, tgt: null, has: false }));
+
+function shortestArc(from, to) {
+    return ((to - from + 540) % 360) - 180;
+}
+
+/* ---------------- 后端推来的从鸟位置 ---------------- */
+const FOLLOWER_TARGET = Array.from({ length: 7 }, () => ({ x: 0.5, y: 0.5, seen: false }));
+
+function applyFollower(i, nx, ny) {
+    const t = FOLLOWER_TARGET[i];
+    if (!t.seen) {                 // 首次拿到坐标才显形，避免 7 只全叠在中心
+        t.seen = true;
+        FLOCK[i + 1].g.setAttribute('opacity', '1');
+    }
+    t.x = clamp(nx, 0, 1);
+    t.y = clamp(ny, 0, 1);
+    const p = padPx(t.x, t.y);
+    FLOCK[i + 1].tx = p.x;
+    FLOCK[i + 1].ty = p.y;
+}
+
+/* =========================================================================
+   背景装饰：气泡 + 远处鸟群
+   固定种子，每次加载图案相同；纯 CSS 动画，不占 JS 帧预算。
+   ========================================================================= */
+function rngFactory(seed) {
+    let s = seed >>> 0;
+    return () => {
+        s ^= s << 13; s ^= s >>> 17; s ^= s << 5;
+        return (s >>> 0) / 4294967296;
+    };
+}
+
+function buildScene() {
+    const rnd = rngFactory(0xb01d5);
+
+    /* ===== 云：会聚散、会互相穿过 =====
+       结构（三层，缺一层就"活"不起来）：
+         .clouddrift  外层，整体下落（云层走向，速度各不同 → 会互相穿过）
+         .cloudbreath 中层，缩放 + 透明度呼吸（聚散）
+         .litdrift    亮顶层，相对暗底缓慢滑动（光照在变）
+       周期全部互质，所以永不重复同一形状；再配合"空"区间（呼吸到 .82 且透明最低），
+       视觉上就是一朵云聚起来、散开、再聚。
+
+       ★ 铁律：**每一朵云都必须动**。曾经把远层做成静态（"只光栅一次省 CPU"），
+         结果 7 朵全堆在画布顶边成一排灰疙瘩 —— 静态图层读不出"云"，只读得出"贴纸"。
+         远层要省成本就靠"更慢 + 更淡 + 更糊"，不是靠"不动"。 */
+    const FAR = $('cloudsFar');
+    const NEAR = $('cloudsNear');
+
+    function cloudLobes(cx, cy, w, h, jitter) {
+        const out = [];
+        /* 每朵云先随机两件事：整体横向拉伸、以及「重心偏移」。
+           同一套参数生成的云彼此很像，加了这两项才有多样性。 */
+        const stretch = 0.72 + rnd() * 0.62;       // 0.72 … 1.34
+        const skewX = (rnd() - 0.5) * 0.55;        // 重心左右偏
+        const domeH = 0.26 + rnd() * 0.46;         // 圆顶高度（有的很扁，有的很鼓）
+        const lumps = 1 + Math.floor(rnd() * 3);   // 额外凸起的数量
+
+        const n = 9 + Math.floor(rnd() * 7);
+        for (let i = 0; i < n; i++) {
+            const t = i / (n - 1);
+            const bx = (t - 0.5) * 2;
+            /* 用 pow 打散：有的云中间鼓、有的偏一侧 */
+            const fall = Math.pow(1 - bx * bx, 0.55 + rnd() * 0.75);
+            const px = cx + (bx * w * (0.40 + rnd() * 0.26) * stretch) + skewX * w * 0.18;
+            const py = cy - fall * h * domeH * (0.7 + rnd() * 0.8) + rnd() * h * jitter;
+            const rx = w * (0.16 + rnd() * 0.20) * (1 - 0.26 * Math.abs(bx));
+            const ry = h * (0.48 + rnd() * 0.54) * (1 - 0.18 * Math.abs(bx));
+            out.push([px, py, rx, ry]);
+        }
+        /* 额外的"鼓包"：随机位置叠小球，形状才不规则 */
+        for (let i = 0; i < lumps; i++) {
+            out.push([
+                cx + (rnd() - 0.5) * w * 1.15 * stretch,
+                cy - rnd() * h * domeH * 1.5 + rnd() * h * 0.3,
+                w * (0.10 + rnd() * 0.16),
+                h * (0.34 + rnd() * 0.40)
+            ]);
+        }
+        return out;
+    }
+
+    /* 云体一律建在**原点**，位置 100% 交给 .clouddrift 的 --x0/--y0 → --x1/--y1。
+       好处：不可能出现"忘了给坐标所以堆在 (0,0)"的云。
+       dur 是下落一整圈的时间；bDur 是呼吸周期；偏离整数倍 → 形状不重复。 */
+    function makeCloud(host, lane, w, h, op, blur, dur, bDur, drift_px) {
+        /* lane 只决定「横向在哪一列」，纵向完全由时间轴覆盖全屏 */
+        const sway = drift_px;
+
+        const drift = svgEl('g', { class: 'clouddrift' });
+        drift.style.animationDuration = dur.toFixed(1) + 's';
+        /* 负延迟 = 一开始就散布在整条时间轴的不同位置，不会齐刷刷一起下 */
+        drift.style.animationDelay = (-rnd() * dur).toFixed(1) + 's';
+        drift.style.setProperty('--x0', lane.toFixed(0) + 'px');
+        drift.style.setProperty('--x1', (lane + sway).toFixed(0) + 'px');
+        /* 从画面上方之外 → 下方之外；行程比画布高 760 还多，保证完全进出 */
+        drift.style.setProperty('--y0', (-h * 1.6 - 60 - rnd() * 180).toFixed(0) + 'px');
+        drift.style.setProperty('--y1', (820 + rnd() * 200).toFixed(0) + 'px');
+
+        const breath = svgEl('g', { class: 'cloudbreath' });
+        breath.style.animationDuration = bDur.toFixed(1) + 's';
+        breath.style.animationDelay = (-rnd() * bDur).toFixed(1) + 's';
+        breath.style.setProperty('--op', op.toFixed(3));
+
+        /* 暗底：下沉 0.30h、偏冷蓝 → 体积 */
+        const shade = svgEl('g', { filter: 'url(#' + blur + ')' });
+        for (const [px, py, rx, ry] of cloudLobes(0, h * 0.30, w, h * 1.04, 0.10)) {
+            shade.appendChild(svgEl('ellipse', {
+                cx: px.toFixed(1), cy: py.toFixed(1),
+                rx: rx.toFixed(1), ry: ry.toFixed(1),
+                fill: 'rgba(36, 92, 136, .66)'
+            }));
+        }
+
+        /* 亮顶：上移 0.12h、纯白，并且自己有缓慢位移 → 光在流动 */
+        const lit = svgEl('g', { class: 'litdrift', filter: 'url(#' + blur + ')' });
+        lit.style.animationDuration = (bDur * 1.37).toFixed(1) + 's';
+        lit.style.animationDelay = (-rnd() * bDur).toFixed(1) + 's';
+        for (const [px, py, rx, ry] of cloudLobes(0, -h * 0.12, w * 0.94, h * 0.90, 0.08)) {
+            lit.appendChild(svgEl('ellipse', {
+                cx: px.toFixed(1), cy: py.toFixed(1),
+                rx: rx.toFixed(1), ry: ry.toFixed(1),
+                fill: 'rgba(255, 255, 255, .92)'
+            }));
+        }
+
+        breath.append(shade, lit);
+        drift.appendChild(breath);
+        host.appendChild(drift);
+    }
+
+    /* 远层：大、淡、糊、**慢** —— 负责"天空有纵深"。
+       以前这层是静态的（想省 CPU），结果 7 朵全贴在画布顶边成一排灰疙瘩。
+       省成本只能靠「更慢 + 更淡」，不能靠「不动」。
+       lane 铺满整幅 0..620（这层在 pad 背后，pad 只有 48% 不透明，透出来是雾感）。 */
+    for (let i = 0; i < 7; i++) {
+        makeCloud(FAR, -40 + (i / 6) * 660 + (rnd() - 0.5) * 60,
+                  84 + rnd() * 56, 34 + rnd() * 20,
+                  0.24 + rnd() * 0.10, 'cloudBlur',
+                  150 + rnd() * 110, 17 + rnd() * 9,
+                  (rnd() - 0.5) * 110);
+    }
+    /* 近层：多铺几朵、快一些 → 鸟穿过它时忽隐忽现，这是"穿越云层"效果的主体。
+       ★ lane 只能落在 **pad 两侧的边带**（左 -40..118 / 右 480..640）。
+         pad 是 x 146..466 且只有 48% 不透明，近层又亮又实，
+         一旦落进中间就会在 pad 上糊出一坨灰疙瘩（实测过，很难看）。
+         云本来就在 pad **后面**（绘制顺序：cloudsNear → padGlow → pad），
+         所以中间那片区域交给远景鸟去穿，近层只做两侧的"云墙"。
+       不裁剪、只摆位置：实测挂 clip-path 反而每帧要重算遮罩，更贵。 */
+    const LANES = [
+        () => -40 + rnd() * 158,    // 左带
+        () => 480 + rnd() * 160     // 右带
+    ];
+    for (let i = 0; i < 9; i++) {
+        makeCloud(NEAR, LANES[i % 2](),
+                  50 + rnd() * 44, 24 + rnd() * 15,
+                  0.46 + rnd() * 0.14, 'cloudBlurS',
+                  46 + rnd() * 40, 10 + rnd() * 6,
+                  (rnd() - 0.5) * 110);
+    }
+
+    /* ===== 远景鸟：从下往上穿过云层 ===== */
+    const amb = $('ambient');
+    amb.innerHTML = '';
+    for (let i = 0; i < 12; i++) {
+        const x = 10 + rnd() * 600;
+        const s = 3.0 + rnd() * 3.2;
+        const dur = 12 + rnd() * 16;
+        const delay = -rnd() * dur;
+        const dx = (rnd() - 0.5) * 90;             // 上升时的横向偏移
+        const flip = rnd() < 0.5 ? -0.7 : 0.7;     // 两种翼展
+
+        /* 外层固定 x；内层做纵向上升动画 */
+        const col = svgEl('g', { transform: 'translate(' + x.toFixed(1) + ' 0)' });
+        const run = svgEl('g', { class: 'ambrun' });
+        run.style.animationDuration = dur.toFixed(1) + 's';
+        run.style.animationDelay = delay.toFixed(1) + 's';
+        run.style.setProperty('--dx', dx.toFixed(0) + 'px');
+        run.style.setProperty('--op', (0.26 + rnd() * 0.26).toFixed(2));
+
+        const p = svgEl('path', { d: birdPath(flip) });
+        /* 航向朝上 = rotate(0)；略微倾斜让它像在"盘旋上升"而不是垂直升降 */
+        p.setAttribute('transform',
+            'rotate(' + ((rnd() - 0.5) * 14).toFixed(1) + ') scale(' + s.toFixed(2) + ')');
+        p.setAttribute('vector-effect', 'non-scaling-stroke');
+
+        run.appendChild(p);
+        col.appendChild(run);
+        amb.appendChild(col);
+    }
+}
+
+/* =========================================================================
+   控制台：旋钮（原版 Boids 就是 rslider，推子只属于 SwarmGrain 的 McCudy 致敬）
+   排布按 DSP 信号流：Flock → Delay Set → Pitch Warp → Room → Master
+   每个 band 里并排 1~2 组，避免 5 行旋钮把 344px 的控制台撑爆。
+   ========================================================================= */
+const BANDS = [
+    [
+        { n: '01', name: 'Flock', knobs: [
+            ['coh', 'Cohesion'], ['ali', 'Alignment'], ['sep', 'Separation'], ['speed', 'Speed']
+        ] },
+        { n: '02', name: 'Delay Set', knobs: [
+            ['delay_base', 'Delay Base'], ['feedback', 'Feedback'],
+            ['mod_rate', 'LFO Rate'], ['Flock_Decay', 'Flock Decay']
+        ] }
+    ],
+    [
+        { n: '03', name: 'Pitch Warp', pitch: ['m1', 'm2', 'm3', 'm4', 'm5', 'm6', 'm7'] }
+    ],
+    [
+        { n: '04', name: 'Room', wide: true, knobs: [
+            ['roomSize', 'Room Size'], ['cutoff', 'Damping']
+        ], wet: true },
+        { n: '05', name: 'Master', knobs: [
+            ['dry_wet', 'Flock Mix'], ['vol', 'Master Gain']
+        ] }
+    ]
+];
+
+const KNOB_UI = {};
+
+/* 旋钮几何：135° 起、顺时针扫 270°（0° 在 12 点方向） */
+const KB = { cx: 29, cy: 29, r: 22, tickR: 25.5, a0: 135, sweep: 270 };
+
+function polar(r, deg) {
+    const a = (deg - 90) * Math.PI / 180;
+    return [KB.cx + r * Math.cos(a), KB.cy + r * Math.sin(a)];
+}
+
+function arcPath(r, a0, a1) {
+    const [x0, y0] = polar(r, a0);
+    const [x1, y1] = polar(r, a1);
+    const large = (a1 - a0) > 180 ? 1 : 0;
+    const f = v => v.toFixed(2);
+    return 'M' + f(x0) + ' ' + f(y0) + ' A' + r + ' ' + r + ' 0 ' + large + ' 1 ' + f(x1) + ' ' + f(y1);
+}
+
+function makeSectionTitle(n, name) {
+    const d = document.createElement('div');
+    d.className = 'sh';
+    d.innerHTML = '<b>' + n + '</b><span>' + name + '</span><i></i>';
+    return d;
+}
+
+function makeKnob(key, label, small, extraTop) {
+    const wrap = document.createElement('div');
+    wrap.className = 'knob' + (small ? ' sm' : '');
+
+    const svg = svgEl('svg', { viewBox: '0 0 58 58' });
+    svg.appendChild(svgEl('circle', { class: 'plate', cx: KB.cx, cy: KB.cy, r: 16.5 }));
+
+    /* 11 根刻度：首末两根加长，读起来有起止感 */
+    for (let i = 0; i <= 10; i++) {
+        const a = KB.a0 + KB.sweep * (i / 10);
+        const len = (i === 0 || i === 10) ? 4.5 : 2.6;
+        const [x0, y0] = polar(KB.tickR - len, a);
+        const [x1, y1] = polar(KB.tickR, a);
+        svg.appendChild(svgEl('line', {
+            class: 'tick',
+            x1: x0.toFixed(2), y1: y0.toFixed(2),
+            x2: x1.toFixed(2), y2: y1.toFixed(2)
+        }));
+    }
+
+    svg.appendChild(svgEl('path', { class: 'gauge', d: arcPath(KB.r, KB.a0, KB.a0 + KB.sweep) }));
+    const arc = svgEl('path', { class: 'arc', d: '' });
+    svg.appendChild(arc);
+
+    /* 指针放在 plate(16.5) 与值弧(22) 之间的缝里（r 17.2→20.6）：
+       从圆心拉线会穿过中央数值、贴在 plate 内侧又会压到数字 */
+    const [p0x, p0y] = polar(17.2, KB.a0);
+    const [p1x, p1y] = polar(20.6, KB.a0);
+    const ptr = svgEl('line', {
+        class: 'ptr',
+        x1: p0x.toFixed(2), y1: p0y.toFixed(2),
+        x2: p1x.toFixed(2), y2: p1y.toFixed(2)
+    });
+    svg.appendChild(ptr);
+
+    const val = document.createElement('input');
+    val.className = 'kval';
+    val.type = 'text';
+    val.inputMode = 'decimal';
+    val.spellcheck = false;
+    val.autocomplete = 'off';
+    val.value = P[key].fmt(V[key]);
+
+    const lab = document.createElement('div');
+    lab.className = 'klab';
+    lab.textContent = label;
+
+    wrap.append(svg, val, lab);
+    if (extraTop) wrap.style.paddingTop = extraTop + 'px';
+
+    KNOB_UI[key] = { wrap, arc, ptr, val };
+
+    bindKnob(key, wrap, val);
+    return wrap;
+}
+
+function makePitchKnob(key, num) {
+    const cell = document.createElement('div');
+    cell.className = 'pcell';
+    cell.style.flex = '1';
+    cell.style.display = 'flex';
+    cell.style.flexDirection = 'column';
+    cell.style.alignItems = 'center';
+    cell.style.minWidth = '0';
+
+    const head = document.createElement('div');
+    head.className = 'pnum';
+    head.textContent = num;
+
+    const k = makeKnob(key, '', true);
+    k.style.height = 'auto';
+
+    cell.append(head, k);
+    return cell;
+}
+
+function buildDeck() {
+    const host = $('groups');
+    host.innerHTML = '';
+
+    for (const band of BANDS) {
+        const b = document.createElement('div');
+        b.className = 'band';
+
+        for (const g of band) {
+            const grp = document.createElement('div');
+            grp.className = 'grp' + (g.wide ? ' wide' : '');
+            grp.appendChild(makeSectionTitle(g.n, g.name));
+
+            const row = document.createElement('div');
+            row.className = 'krow';
+
+            if (g.pitch) {
+                g.pitch.forEach((key, i) => row.appendChild(makePitchKnob(key, String(i + 1))));
+            } else {
+                for (const [key, label] of g.knobs) row.appendChild(makeKnob(key, label, false));
+            }
+            grp.appendChild(row);
+
+            if (g.wet) {
+                /* 湿声双滑块塞进同一行，垂直居中 */
+                const wet = makeWetBox();
+                row.appendChild(wet);
+            }
+
+            b.appendChild(grp);
+        }
+        host.appendChild(b);
+    }
+}
+
+function makeWetBox() {
+    const box = document.createElement('div');
+    box.className = 'wetbox';
+
+    const head = document.createElement('div');
+    head.className = 'wethead';
+    const lab = document.createElement('span');
+    lab.className = 'wetlab';
+    lab.textContent = 'Wet Send';
+    const unit = document.createElement('span');
+    unit.className = 'wetunit';
+    unit.textContent = 'min / max';
+    head.append(lab, unit);
+
+    const line = document.createElement('div');
+    line.className = 'wetline';
+
+    const dual = document.createElement('div');
+    dual.className = 'dual';
+    dual.id = 'dual';
+    dual.append(
+        Object.assign(document.createElement('div'), { className: 'ticks' }),
+        Object.assign(document.createElement('div'), { className: 'track' }),
+        Object.assign(document.createElement('div'), { className: 'fill', id: 'wetRange' }),
+        Object.assign(document.createElement('div'), { className: 'thumb', id: 'thumbMin' }),
+        Object.assign(document.createElement('div'), { className: 'thumb', id: 'thumbMax' })
+    );
+
+    const vals = document.createElement('div');
+    vals.className = 'wetvals';
+    const vi = document.createElement('input');
+    vi.id = 'wetMinOut'; vi.type = 'text'; vi.inputMode = 'decimal';
+    vi.value = WET.min.toFixed(2);
+    const vo = document.createElement('input');
+    vo.id = 'wetMaxOut'; vo.type = 'text'; vo.inputMode = 'decimal';
+    vo.value = WET.max.toFixed(2);
+    vals.append(vi, vo);
+
+    line.append(dual, vals);
+    box.append(head, line);
+    return box;
+}
+
+/* ---------------- 旋钮绘制 / 写入 ---------------- */
+function paintKnob(key) {
+    const ui = KNOB_UI[key];
+    if (!ui) return;
+    const p = P[key];
+    const f = toFrac(clamp(V[key], p.min, p.max), p);
+
+    /* 值弧：0 时完全不画，避免起点留一个小圆点 */
+    ui.arc.setAttribute('d', f > 0.001 ? arcPath(KB.r, KB.a0, KB.a0 + KB.sweep * f) : '');
+    const [px, py] = polar(20.6, KB.a0 + KB.sweep * f);
+    const [qx, qy] = polar(17.2, KB.a0 + KB.sweep * f);
+    ui.ptr.setAttribute('x1', qx.toFixed(2));
+    ui.ptr.setAttribute('y1', qy.toFixed(2));
+    ui.ptr.setAttribute('x2', px.toFixed(2));
+    ui.ptr.setAttribute('y2', py.toFixed(2));
+
+    if (editing.key === key) return;
+    ui.val.value = p.fmt(V[key]);
+}
+
+function setParam(key, v) {
+    V[key] = v;
+    if (key === 'x' || key === 'y') paintLeader();
+    paintKnob(key);
+}
+
+/* ---------------- 数值输入 ---------------- */
+const editing = { key: null, el: null };
+
+function parseNum(raw, p) {
+    let t = String(raw).trim().toLowerCase().replace(/\s+/g, '');
+    if (!t) return NaN;
+    let mul = 1;
+    if (t.endsWith('k')) { mul = 1000; t = t.slice(0, -1); }
+    else if (t.endsWith('hz')) { t = t.slice(0, -2); }
+    const n = parseFloat(t);
+    if (!isFinite(n)) return NaN;
+    const v = n * mul;
+    return clamp(Math.round(v / p.step) * p.step, p.min, p.max);
+}
+
+function commitEdit() {
+    const key = editing.key;
+    if (!key) return;
+    const el = editing.el;
+    editing.key = null;
+    editing.el = null;
+    if (KNOB_UI[key]) KNOB_UI[key].wrap.classList.remove('editing');
+    const v = parseNum(el.value, P[key]);
+    el.blur();
+    if (!isFinite(v)) { paintKnob(key); return; }
+    setParam(key, v);
+    sendParam(key, v, 'complete');
+}
+
+function exitEdit(key) {
+    if (editing.key !== key) return;
+    editing.key = null;
+    editing.el = null;
+    const ui = KNOB_UI[key];
+    if (ui) {
+        ui.wrap.classList.remove('editing');
+        ui.val.blur();          /* editing.key 已清空，blur 不会再触发 commitEdit */
+    }
+}
+
+function resetParam(key) {
+    /* 必须先退出编辑态：否则 paintKnob 会因为 editing.key===key 跳过，
+       屏幕上还留着旧数字，而 V 已经变成默认值 —— 两边不一致 */
+    exitEdit(key);
+    const d = P[key].def;
+    setParam(key, d);
+    paintKnob(key);
+    sendParam(key, d, 'complete');
+}
+
+function sendParam(key, v, gesture) {
+    Cabbage.sendControlData({ channel: key, value: v, gesture: gesture }, null);
+}
+
+/* ---------------- 旋钮交互 ----------------
+   一次 pointerdown 有**两种**去向，靠位移判定：
+     · 位移 < 3px 且抬起  → 进编辑（聚焦中央数值框）
+     · 位移 ≥ 3px         → 拖拽调值（纵向，全程 150px；Shift 精调）
+   这样"点一下改数值"和"按住拖"共用同一个热区，不用把数值框做成可点
+   （`.kval` 常态 pointer-events:none，否则它会盖住旋钮中心的拖拽热区）。
+   */
+function bindKnob(key, wrap, val) {
+    const p = P[key];
+    const DRAG_PX = 3;
+
+    wrap.addEventListener('pointerdown', e => {
+        if (e.button !== 0) return;
+        if (wrap.classList.contains('editing')) return;   /* 编辑中交给 input 自己处理 */
+        e.preventDefault();
+        e.stopPropagation();
+        wrap.setPointerCapture(e.pointerId);
+        dragOn[key] = true;
+
+        const f0 = toFrac(clamp(V[key], p.min, p.max), p);
+        const x0 = e.clientX, y0 = e.clientY;
+        let dragging = false;
+
+        const apply = ev => {
+            const rate = ev.shiftKey ? 1 / 620 : 1 / 150;
+            const next = clamp(f0 + (y0 - ev.clientY) * rate, 0, 1);
+            const v = clamp(Math.round(fromFrac(next, p) / p.step) * p.step, p.min, p.max);
+            setParam(key, v);
+            sendParam(key, v, 'value');
+        };
+
+        const move = ev => {
+            if (!dragging) {
+                if (Math.hypot(ev.clientX - x0, ev.clientY - y0) < DRAG_PX) return;
+                dragging = true;
+                sendParam(key, V[key], 'begin');
+            }
+            apply(ev);
+        };
+
+        const up = () => {
+            dragOn[key] = false;
+            wrap.releasePointerCapture(e.pointerId);
+            wrap.removeEventListener('pointermove', move);
+            wrap.removeEventListener('pointerup', up);
+            wrap.removeEventListener('pointercancel', up);
+
+            if (dragging) {
+                sendParam(key, V[key], 'end');
+            } else {
+                /* 只是点了一下 → 进编辑 */
+                wrap.classList.add('editing');
+                editing.key = key;
+                editing.el = val;
+                val.focus();
+                val.select();
+            }
+        };
+
+        wrap.addEventListener('pointermove', move);
+        wrap.addEventListener('pointerup', up);
+        wrap.addEventListener('pointercancel', up);
+    });
+
+    /* 数值框：编辑态下 pointer-events 变 auto，这里只负责拦冒泡 */
+    val.addEventListener('pointerdown', e => e.stopPropagation());
+    val.addEventListener('blur', () => { if (editing.key === key) commitEdit(); });
+    val.addEventListener('keydown', e => {
+        if (e.key === 'Enter') { e.preventDefault(); commitEdit(); val.blur(); }
+        else if (e.key === 'Escape') {
+            exitEdit(key);
+            paintKnob(key);
+        }
+    });
+
+    wrap.addEventListener('dblclick', e => {
+        e.preventDefault();
+        resetParam(key);
+    });
+}
+
+/* =========================================================================
+   头鸟位置（pad 拖拽 + X / Y 推子）
+   ========================================================================= */
+function paintLeader() {
+    $('xbar').style.left = (V.x * 100).toFixed(3) + '%';
+    $('xfill').style.width = (V.x * 100).toFixed(3) + '%';
+    $('ybar').style.top = ((1 - V.y) * 100).toFixed(3) + '%';
+    $('yfill').style.height = (V.y * 100).toFixed(3) + '%';
+    $('xv').textContent = V.x.toFixed(3);
+    $('yv').textContent = V.y.toFixed(3);
+
+    const p = padPx(V.x, V.y);
+    FLOCK[0].tx = p.x;
+    FLOCK[0].ty = p.y;
+}
+
+function bindAxis(which) {
+    const track = $(which === 'x' ? 'xtrack' : 'ytrack');
+    track.addEventListener('pointerdown', e => {
+        if (e.button !== 0) return;
+        e.preventDefault();
+        e.stopPropagation();
+        track.setPointerCapture(e.pointerId);
+        dragOn[which] = true;
+
+        const r = track.getBoundingClientRect();
+        const apply = ev => {
+            const v = which === 'x'
+                ? clamp((ev.clientX - r.left) / r.width, 0, 1)
+                : clamp(1 - (ev.clientY - r.top) / r.height, 0, 1);
+            setParam(which, Math.round(v * 1000) / 1000);
+            sendParam(which, V[which], 'value');
+        };
+        apply(e);
+        sendParam(which, V[which], 'begin');
+
+        const move = ev => { if (dragOn[which]) apply(ev); };
+        const up = () => {
+            dragOn[which] = false;
+            track.releasePointerCapture(e.pointerId);
+            track.removeEventListener('pointermove', move);
+            track.removeEventListener('pointerup', up);
+            track.removeEventListener('pointercancel', up);
+            sendParam(which, V[which], 'end');
+        };
+        track.addEventListener('pointermove', move);
+        track.addEventListener('pointerup', up);
+        track.addEventListener('pointercancel', up);
+    });
+
+    track.addEventListener('dblclick', e => { e.preventDefault(); resetParam(which); });
+}
+
+function bindPad() {
+    const hit = $('padhit');
+    hit.addEventListener('pointerdown', e => {
+        if (e.button !== 0) return;
+        e.preventDefault();
+        hit.setPointerCapture(e.pointerId);
+        dragOn.pad = true;
+
+        const r = hit.getBoundingClientRect();
+        const apply = ev => {
+            /* 圆盘钳制：声场是以 pad 中心为圆心、半径 0.5 的圆盘，
+               方形四角在盘外，拖到角落时贴着盘边停住 */
+            const [nx, ny] = clampDisc01(
+                clamp((ev.clientX - r.left) / r.width, 0, 1),
+                clamp(1 - (ev.clientY - r.top) / r.height, 0, 1));
+            setParam('x', Math.round(nx * 1000) / 1000);
+            setParam('y', Math.round(ny * 1000) / 1000);
+            sendParam('x', V.x, 'value');
+            sendParam('y', V.y, 'value');
+        };
+        apply(e);
+        sendParam('x', V.x, 'begin');
+        sendParam('y', V.y, 'begin');
+
+        const move = ev => { if (dragOn.pad) apply(ev); };
+        const up = () => {
+            dragOn.pad = false;
+            hit.releasePointerCapture(e.pointerId);
+            hit.removeEventListener('pointermove', move);
+            hit.removeEventListener('pointerup', up);
+            hit.removeEventListener('pointercancel', up);
+            sendParam('x', V.x, 'end');
+            sendParam('y', V.y, 'end');
+        };
+        hit.addEventListener('pointermove', move);
+        hit.addEventListener('pointerup', up);
+        hit.addEventListener('pointercancel', up);
+    });
+
+    hit.addEventListener('dblclick', e => {
+        e.preventDefault();
+        setParam('x', P.x.def); setParam('y', P.y.def);
+        sendParam('x', P.x.def, 'complete');
+        sendParam('y', P.y.def, 'complete');
+    });
+}
+
+/* =========================================================================
+   湿声双滑块
+   ========================================================================= */
+const wetEl = { min: null, max: null };
+
+function paintWet() {
+    $('thumbMin').style.left = (WET.min * 100).toFixed(3) + '%';
+    $('thumbMax').style.left = (WET.max * 100).toFixed(3) + '%';
+    $('wetRange').style.left = (WET.min * 100).toFixed(3) + '%';
+    $('wetRange').style.width = ((WET.max - WET.min) * 100).toFixed(3) + '%';
+    if (editing.key !== 'minWet') $('wetMinOut').value = WET.min.toFixed(3);
+    if (editing.key !== 'maxWet') $('wetMaxOut').value = WET.max.toFixed(3);
+}
+
+function bindThumb(id, which) {
+    const el = $(id);
+    el.addEventListener('pointerdown', e => {
+        if (e.button !== 0) return;
+        e.preventDefault();
+        e.stopPropagation();
+        el.setPointerCapture(e.pointerId);
+        dragOn.wet = which;
+
+        const r = $('dual').getBoundingClientRect();
+        const apply = ev => {
+            let v = clamp((ev.clientX - r.left) / r.width, 0, 1);
+            if (which === 'min') WET.min = Math.min(v, WET.max - 0.001);
+            else WET.max = Math.max(v, WET.min + 0.001);
+            paintWet();
+            sendParam(which === 'min' ? 'minWet' : 'maxWet',
+                      which === 'min' ? WET.min : WET.max, 'value');
+        };
+        apply(e);
+        sendParam(which === 'min' ? 'minWet' : 'maxWet', which === 'min' ? WET.min : WET.max, 'begin');
+
+        const move = ev => { if (dragOn.wet) apply(ev); };
+        const up = () => {
+            dragOn.wet = null;
+            el.releasePointerCapture(e.pointerId);
+            el.removeEventListener('pointermove', move);
+            el.removeEventListener('pointerup', up);
+            el.removeEventListener('pointercancel', up);
+            sendParam(which === 'min' ? 'minWet' : 'maxWet',
+                      which === 'min' ? WET.min : WET.max, 'end');
+        };
+        el.addEventListener('pointermove', move);
+        el.addEventListener('pointerup', up);
+        el.addEventListener('pointercancel', up);
+    });
+}
+
+function bindWetField(id, which) {
+    const el = $(id);
+    el.addEventListener('pointerdown', e => e.stopPropagation());
+    el.addEventListener('focus', () => { editing.key = which; el.select(); });
+    el.addEventListener('blur', () => {
+        if (editing.key !== which) return;
+        editing.key = null;
+        const n = clamp(parseFloat(el.value), 0, 1);
+        if (!isFinite(n)) { paintWet(); return; }
+        if (which === 'minWet') WET.min = Math.min(n, WET.max - 0.001);
+        else WET.max = Math.max(n, WET.min + 0.001);
+        paintWet();
+        sendParam(which, which === 'minWet' ? WET.min : WET.max, 'complete');
+    });
+    el.addEventListener('keydown', e => {
+        if (e.key === 'Enter') { e.preventDefault(); el.blur(); }
+    });
+}
+
+/* =========================================================================
+   电平表
+   ========================================================================= */
+const DB_MARKS = [0, -6, -12, -18, -24, -30, -40, -50, -60];
+const DB_FLOOR = -60;      /* 表底 = -60 dBFS */
+const METER_H = 280;       /* .bar 的 CSS 高度，cap 位移要用同一个数 */
+
+/* ★ 表柱与刻度必须共用同一条 dB 映射。
+   这里曾经写成 Math.pow(v, 0.55)（"看起来像对数"的幂律近似），
+   0 dB 端巧合对得上，越小声偏得越离谱：
+     -6 dB 显示成 -19（差 13）、-12 dB 显示成 -32（差 20）、-24 dB 显示成 -47（差 23）。
+   实测就是"表比真实电平小一大截"。别再用幂律凑，直接算 dB。 */
+const ampToDb = a => 20 * Math.log10(Math.max(Math.abs(a), 1e-6));
+/* db → 0(底)…1(顶)；0 dB 在顶、DB_FLOOR 在底 */
+const dbToPos = db => clamp((db - DB_FLOOR) / (0 - DB_FLOOR), 0, 1);
+
+function buildDbScales() {
+    for (const id of ['scaleL', 'scaleR']) {
+        const host = $(id);
+        host.innerHTML = '';
+        for (const db of DB_MARKS) {
+            const t = document.createElement('div');
+            t.className = 't' + (db === 0 ? ' zero' : (db === -6 || db === -12 || db === -24 ? ' major' : ''));
+            /* 刻度用 top：0 dB 在 0%、-60 dB 在 100%，与 dbToPos 严格互补 */
+            t.style.top = ((1 - dbToPos(db)) * 100).toFixed(3) + '%';
+            const n = document.createElement('span');
+            n.className = 'n';
+            n.textContent = db === 0 ? '0' : String(db);
+            t.appendChild(n);
+            host.appendChild(t);
+        }
+    }
+}
+
+function setMeter(barId, capId, v) {
+    const b = $(barId), c = $(capId);
+    if (!b) return;
+    const pos = dbToPos(clamp(ampToDb(v), DB_FLOOR, 0));
+    b.style.transform = 'scaleY(' + pos.toFixed(4) + ')';
+    c.style.transform = 'translateY(' + (-pos * METER_H).toFixed(1) + 'px)';
+    c.style.opacity = pos > 0.002 ? '1' : '0';
+}
+
+/* =========================================================================
+   接收后端
+   ========================================================================= */
+let lvlL = 0, lvlR = 0;
+
+function applyValue(id, v) {
+    if (v === undefined || v === null) return;
+    if (typeof v !== 'number') {
+        v = Number(v);
+        if (isNaN(v)) return;
+    }
+
+    if (typeof id === 'string' && /^b[xy][1-7]$/.test(id)) {
+        const which = id[1];
+        const idx = Number(id[2]) - 1;
+        if (idx >= 0 && idx < 7) {
+            const cur = FOLLOWER_TARGET[idx];
+            if (which === 'x') applyFollower(idx, v, cur.y);
+            else applyFollower(idx, cur.x, v);
+        }
+        return;
+    }
+
+    if (id === 'bdir') { HEAD[0].tgt = v; HEAD[0].has = true; return; }
+    if (typeof id === 'string' && /^ba[1-7]$/.test(id)) {
+        const i = Number(id[2]);
+        HEAD[i].tgt = v;
+        HEAD[i].has = true;
+        return;
+    }
+
+    switch (id) {
+        case 'outL': lvlL = v; setMeter('mtrL', 'capL', v); break;
+        case 'outR': lvlR = v; setMeter('mtrR', 'capR', v); break;
+
+        case 'minWet':
+            if (dragOn.wet === 'min') break;
+            WET.min = Math.min(clamp(v, 0, 1), WET.max - 0.001); paintWet();
+            break;
+        case 'maxWet':
+            if (dragOn.wet === 'max') break;
+            WET.max = Math.max(clamp(v, 0, 1), WET.min + 0.001); paintWet();
+            break;
+
+        default:
+            if (P[id]) {
+                if (dragOn[id] || (dragOn.pad && (id === 'x' || id === 'y'))) break;
+                setParam(id, clamp(v, P[id].min, P[id].max));
+            }
+    }
+}
+
+Cabbage.addMessageListener(msg => {
+    const data = msg.data ?? msg;
+    if (msg.command === 'widgetUpdate') {
+        const id = data.id ?? data.channel;
+        const v = data.value !== undefined ? data.value : Cabbage.extractValue(data, id);
+        applyValue(id, v);
+    } else if (msg.command === 'batchWidgetUpdate') {
+        for (const w of msg.widgets ?? []) {
+            const e = w.data ?? w;
+            applyValue(e.id, Cabbage.extractValue(e, e.id));
+        }
+    } else if (msg.command === 'resizeResponse') {
+        if (hostResize !== 'accepted') {
+            const d = msg.data ?? msg;
+            hostResize = d.accepted ? 'accepted' : 'rejected';
+            if (hostResize === 'accepted') { reqViewport = 0; clearTimeout(reqTimer); }
+            paintZoomBadge();
+        }
+    } else if (msg.command === 'parameterChange') {
+        const pm = msg.data ?? msg;
+        const id = typeof pm.channel === 'string' ? pm.channel : PARAM_IDX[pm.paramIdx];
+        if (id) applyValue(id, pm.value);
+    }
+});
+
+/* =========================================================================
+   窗口缩放：画布必须领先窗口（ResizeObserver + requestResize）
+   ========================================================================= */
+const CANVAS = { w: 620, h: 760 };
+const BASE = 1;
+const MIN_SCALE = 0.75 * BASE;
+const MAX_FILL = 0.94;
+
+const screenW = () => (screen.availWidth || screen.width || 0);
+const screenH = () => (screen.availHeight || screen.height || 0);
+
+function maxScale() {
+    const sw = screenW(), sh = screenH();
+    const byW = sw ? sw / CANVAS.w : 3;
+    const byH = sh ? sh / CANVAS.h : 3;
+    return Math.max(MIN_SCALE, Math.min(12, Math.min(byW, byH) * MAX_FILL));
+}
+
+const viewScale = () => Math.min(innerWidth / CANVAS.w, innerHeight / CANVAS.h);
+
+let hostResize = 'unknown';
+let reqViewport = 0;
+let reqTimer = 0;
+let zoomDrag = null;
+let holdScale = null;
+let pendingScale = null;
+let rafId = 0;
+let lastSent = 0;
+
+const yOf = e => (typeof e.screenY === 'number' && e.screenY !== 0) ? e.screenY : e.clientY;
+
+function paintZoomBadge(override) {
+    const s = override != null ? override : viewScale() / BASE;
+    document.body.style.setProperty('--zoom', (s * BASE).toFixed(4));
+    $('zpct').textContent = Math.round(s * 100) + '%';
+}
+
+function fitToViewport() {
+    if (reqViewport && (innerWidth !== reqViewport.w || innerHeight !== reqViewport.h)) {
+        reqViewport = 0;
+        clearTimeout(reqTimer);
+        hostResize = 'accepted';
+    }
+    if (holdScale != null && Math.abs(viewScale() / BASE - holdScale) < 0.01) holdScale = null;
+    paintZoomBadge(zoomDrag && zoomDrag.moved ? zoomDrag.target : (holdScale ?? undefined));
+}
+
+function requestWindowScale(scale) {
+    let w = Math.round(CANVAS.w * scale * BASE);
+    let h = Math.round(CANVAS.h * scale * BASE);
+    const limit = Math.floor(screenH() * MAX_FILL);
+    if (limit > 0 && h > limit) {
+        h = limit;
+        w = Math.round(h * CANVAS.w / CANVAS.h);
+    }
+    reqViewport = { w: innerWidth, h: innerHeight };
+    clearTimeout(reqTimer);
+    reqTimer = setTimeout(() => {
+        if (reqViewport) { reqViewport = 0; hostResize = 'rejected'; holdScale = null; paintZoomBadge(); }
+    }, 600);
+    Cabbage.requestResize(w, h, null);
+}
+
+function scheduleResizeRequest() {
+    if (rafId) return;
+    rafId = requestAnimationFrame(() => {
+        rafId = 0;
+        if (pendingScale == null) return;
+        if (lastSent && Math.abs(pendingScale - lastSent) < 0.004) return;
+        lastSent = pendingScale;
+        requestWindowScale(lastSent);
+    });
+}
+
+function bindZoom() {
+    const z = $('zoomer');
+    z.addEventListener('pointerdown', e => {
+        if (e.button !== 0) return;
+        e.preventDefault();
+        e.stopPropagation();
+        z.setPointerCapture(e.pointerId);
+        zoomDrag = { x0: e.clientX, y0: yOf(e), base: viewScale() / BASE, moved: false, target: null };
+        pendingScale = zoomDrag.base;
+        document.body.classList.add('dragging-zoom');
+    });
+    z.addEventListener('pointermove', e => {
+        if (!zoomDrag) return;
+        const dx = e.clientX - zoomDrag.x0;
+        const dy = yOf(e) - zoomDrag.y0;
+        const d = (dx + dy) / 2;
+        if (Math.abs(d) > 2) zoomDrag.moved = true;
+        let s = zoomDrag.base * Math.exp(d / 260);
+        s = clamp(s, MIN_SCALE, maxScale());
+        zoomDrag.target = s;
+        pendingScale = s;
+        paintZoomBadge(s);
+        scheduleResizeRequest();
+    });
+    const end = () => {
+        if (!zoomDrag) return;
+        const s = zoomDrag.target;
+        const moved = zoomDrag.moved;
+        zoomDrag = null;
+        document.body.classList.remove('dragging-zoom');
+        if (moved && s != null) { holdScale = s; scheduleResizeRequest(); }
+        else paintZoomBadge();
+    };
+    z.addEventListener('pointerup', end);
+    z.addEventListener('pointercancel', end);
+    z.addEventListener('dblclick', e => {
+        e.preventDefault();
+        holdScale = null;
+        lastSent = 0;
+        pendingScale = 1;
+        requestWindowScale(1);
+        paintZoomBadge(1);
+    });
+}
+
+/* =========================================================================
+   启动
+   ========================================================================= */
+buildScene();
+buildFlock();
+buildDeck();
+
+bindAxis('x');
+bindAxis('y');
+bindPad();
+bindThumb('thumbMin', 'min');
+bindThumb('thumbMax', 'max');
+bindWetField('wetMinOut', 'minWet');
+bindWetField('wetMaxOut', 'maxWet');
+bindZoom();
+
+paintLeader();
+paintWet();
+for (const key of FADER_KEYS) paintKnob(key);
+buildDbScales();
+setMeter('mtrL', 'capL', 0);
+setMeter('mtrR', 'capR', 0);
+
+/* 从鸟一开始不显示，等第一帧真坐标到了再亮：
+   否则闲置时 7 只鸟会全叠在 pad 中心，看起来像一只 */
+for (let i = 1; i < BIRD_COUNT; i++) FLOCK[i].g.setAttribute('opacity', '0');
+
+requestAnimationFrame(renderFlock);
+
+/* 拖动期间禁止原生选中/拖影；输入框必须放行 */
+for (const ev of ['selectstart', 'dragstart']) {
+    document.addEventListener(ev, e => {
+        if (e.target && e.target.closest && e.target.closest('input')) return;
+        if (Object.values(dragOn).some(Boolean)) e.preventDefault();
+    });
+}
+
+new ResizeObserver(fitToViewport).observe(document.documentElement);
+fitToViewport();
+paintZoomBadge();
+
+Cabbage.sendCustomCommand('cabbageIsReadyToLoad', null);
+
+/* ---------------- 手势控制 ----------------
+   手往右 = x 变大,手往上 = y 变大;直接驱动头鸟位置。
+   手动拖 pad / 推子时让位,松手后手势接手。 */
+import('./gesture-ui.js').then(({ attachGestureControl }) => {
+    attachGestureControl({
+        read: () => ({ x: V.x, y: V.y }),
+        write: (x, y) => {
+            setParam('x', x);
+            setParam('y', y);
+        },
+        send: (id, v, g) => sendParam(id, v, g),
+        blocked: () => Object.values(dragOn).some(Boolean),
+    });
+}).catch(e => console.warn('Cabbage: 手势模块不可用 —', e));
+/* ---------------- 内置使用手册 ----------------
+   顶栏 ? 在 iframe 里打开 help.html。只用内嵌:WebView 里 window.open 是死按钮。 */
+import('./help-ui.js').then(({ attachHelp }) => attachHelp())
+    .catch(e => console.warn('Cabbage: 手册模块不可用 —', e));
+
+/* ===== 圆盘模型（双耳声场是圆盘，方形四角在盘外）=====
+   画盘边 + 盘外斜纹，与 DSP 的距离截断 / 坐标钳制保持一致。 */
+(function markDisc() {
+    const svg = document.querySelector('#scene');
+    if (!svg) return;
+    const NS = 'http://www.w3.org/2000/svg';
+    const CXv = 306, CYv = 224, R = 160;
+    let defs = svg.querySelector('defs');
+    if (!defs) {
+        defs = document.createElementNS(NS, 'defs');
+        svg.insertBefore(defs, svg.firstChild);
+    }
+    if (!svg.querySelector('#hatch')) {
+        const pat = document.createElementNS(NS, 'pattern');
+        pat.setAttribute('id', 'hatch');
+        pat.setAttribute('width', '7');
+        pat.setAttribute('height', '7');
+        pat.setAttribute('patternUnits', 'userSpaceOnUse');
+        pat.setAttribute('patternTransform', 'rotate(45)');
+        const ln = document.createElementNS(NS, 'line');
+        ln.setAttribute('x1', '0'); ln.setAttribute('y1', '0');
+        ln.setAttribute('x2', '0'); ln.setAttribute('y2', '7');
+        ln.setAttribute('stroke', 'rgba(255,255,255,.085)');
+        ln.setAttribute('stroke-width', '1');
+        pat.appendChild(ln);
+        defs.appendChild(pat);
+    }
+    const g = document.createElementNS(NS, 'g');
+    const dead = document.createElementNS(NS, 'path');
+    dead.setAttribute('fill', 'url(#hatch)');
+    dead.setAttribute('fill-rule', 'evenodd');
+    dead.setAttribute('d',
+        'M' + (CXv - R) + ' ' + (CYv - R) + 'H' + (CXv + R) +
+        'V' + (CYv + R) + 'H' + (CXv - R) + 'Z ' +
+        'M' + (CXv - R) + ' ' + CYv + 'A' + R + ' ' + R + ' 0 1 0 ' +
+        (CXv + R) + ' ' + CYv + 'A' + R + ' ' + R + ' 0 1 0 ' +
+        (CXv - R) + ' ' + CYv + 'Z');
+    const disc = document.createElementNS(NS, 'circle');
+    disc.setAttribute('cx', CXv);
+    disc.setAttribute('cy', CYv);
+    disc.setAttribute('r', R);
+    disc.setAttribute('fill', 'none');
+    disc.setAttribute('stroke', 'rgba(255,255,255,.30)');
+    disc.setAttribute('stroke-width', '1');
+    g.appendChild(dead);
+    g.appendChild(disc);
+    /* 插入到 pad 底板之后，否则会被不透明的 .padfill 盖住 */
+    const fill = svg.querySelector('.padfill');
+    if (fill && fill.nextSibling) svg.insertBefore(g, fill.nextSibling);
+    else if (fill) svg.appendChild(g);
+    else svg.insertBefore(g, defs.nextSibling);
+})();
+</script>
+</body>
+</html>

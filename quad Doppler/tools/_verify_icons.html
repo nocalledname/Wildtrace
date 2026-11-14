@@ -1,0 +1,66 @@
+<!DOCTYPE html><html lang="zh-CN"><head><meta charset="utf-8"><title>从真实文件验证图标</title>
+<style>
+  :root{--mono:"SF Mono",ui-monospace,Menlo,monospace}
+  *{box-sizing:border-box}
+  body{margin:0;padding:22px 26px 40px;background:#08090b;color:#e8ecf2;
+       font-family:-apple-system,"PingFang SC",sans-serif}
+  h2{font:600 10.5px/1.4 var(--mono);letter-spacing:.18em;text-transform:uppercase;
+     color:#8b97a8;margin:0 0 14px}
+  .row{display:flex;align-items:center;gap:14px;padding:11px 14px;margin-bottom:10px;
+       border:1px solid rgba(255,255,255,.08);border-radius:5px;background:rgba(255,255,255,.02)}
+  .nm{width:120px;font:8.5px var(--mono);color:#6b7787;letter-spacing:.1em;flex:none}
+  .big{transform:scale(4);transform-origin:left center;margin-right:52px;display:flex}
+  .ladder{display:flex;align-items:flex-end;gap:12px;flex:none}
+  .ladder > *{transform:none}
+  .ladder .sc{display:flex;flex-direction:column;align-items:center;gap:3px}
+  .ladder .sc span{font:6.5px var(--mono);color:#4d5666}
+  .hdrline{display:flex;align-items:center;gap:7px;margin-left:auto}
+  .hdrline .b{font:600 12px -apple-system,sans-serif;letter-spacing:.28em}
+  .hdrline .sub{font:6.5px var(--mono);letter-spacing:.24em;color:rgba(255,255,255,.38)}
+  .err{color:#ff6b6b;font:10px var(--mono)}
+</style></head><body>
+<h2>直接读取 18 台 index.html 里的真实图标（quad 9 + depth 9）</h2>
+<div id="app"></div>
+<script>
+/* [目录, 显示名, 颜色, 基础路径] —— 两套目录前缀不同 */
+const SETS = [
+  { label: 'quad · 四声道', base: '../', dirs: [
+    ['Quad-Stasis','STASIS','#ffffff'],['Quad-Orbita','ORBITA','#ff6b3d'],
+    ['Quad-Levy','LÉVY','#ff113e'],['Quad-Loom','LOOM','#ffc24b'],
+    ['Quad-Singularity','SINGULARITY','#ffc95c'],['Quad-Zephyr','ZEPHYR','#c846a0'],
+    ['Quad-SwarmGrain','SWARMGRAIN','#ff2037'],['Quad-Boids','BOIDS','#ff3b40'],
+    ['Quad-Lissajous','LISSAJOUS','#a678ff']]},
+  { label: 'depth · 立体声', base: '../../stereo wildtrace/', dirs: [
+    ['Stasis','STASIS','#ffffff'],['Orbita','ORBITA','#ff6b3d'],
+    ['levy','LÉVY','#ff113e'],['loom','LOOM','#ffc24b'],
+    ['Singularity','SINGULARITY','#ffc95c'],['zephyr','ZEPHYR','#c846a0'],
+    ['SwarmGrain','SWARMGRAIN','#ff2037'],['Boids','BOIDS','#ff3b40'],
+    ['Lissajous','LISSAJOUS','#a678ff']]},
+];
+(async () => {
+  let out = '';
+  for (const set of SETS) {
+    out += `<h2>${set.label}</h2>`;
+    for (const [dir, name, color] of set.dirs) {
+    const url = set.base + encodeURIComponent(dir + ' Cabbage3') + '/index.html';
+    let html = '';
+    try { html = await (await fetch(url)).text(); } catch (e) { html = ''; }
+    const m = html.match(/<svg class="mark"[\s\S]*?<\/svg>/);
+    if (!m) { out += `<div class="row"><span class="nm">${name}</span>
+      <span class="err">✗ 没找到 &lt;svg class="mark"&gt;</span></div>`; continue; }
+    const fs = (px) => m[0].replace(/width:13px;height:13px/, `width:${px}px;height:${px}px`);
+    out += `<div class="row">
+      <span class="nm">${name}</span>
+      <div class="big">${fs(13)}</div>
+      <div class="ladder">
+        ${[11,13,16,20,26].map(px => `<div class="sc">${fs(px)}<span>${px}</span></div>`).join('')}
+      </div>
+      <div class="hdrline">${fs(13)}
+        <span class="b" style="color:${color}">${name}</span>
+        <span class="sub">QUAD DOPPLER</span></div>
+    </div>`;
+    }
+  }
+  document.getElementById('app').innerHTML = out;
+})();
+</script></body></html>

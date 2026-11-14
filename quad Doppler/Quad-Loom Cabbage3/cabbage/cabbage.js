@@ -1,0 +1,585 @@
+// MIT License
+// Copyright (c) 2024 rory Walsh
+// See the LICENSE file for details.
+
+/**
+ * @fileoverview Cabbage API - Communication layer between the webview UI and the Cabbage backend.
+ *
+ * ## Architecture Overview
+ *
+ * This module provides the API for widget-to-backend communication in Cabbage plugins.
+ * There are two communication directions:
+ *
+ * ### UI -> Backend (Outgoing)
+ * Use `sendControlData({ channel, value, gesture })` to send widget value changes to the backend.
+ * Values should be sent in their full range (e.g., 20-20000 Hz for a filter
+ * frequency slider). The backend handles all value normalization needed by the host DAW.
+ * The backend automatically determines whether the channel is automatable and routes
+ * accordingly:
+ * - Automatable channels -> DAW parameter system -> Csound
+ * - Non-automatable channels -> Csound directly
+ * **Thread Safety**: This function is asynchronous and does NOT block the audio thread.
+ * Parameter updates are queued and processed safely without interrupting real-time audio processing.
+ * 
+ * ### Backend -> UI (Incoming)
+ * The backend sends messages via `window.postMessage()` (DAW plugin) or the
+ * VS Code iframe relay (extension). Values received from the host
+ * are in their full range (e.g., 20-20000 Hz for a filter frequency slider).
+ * The backend handles all value normalization needed by the host DAW.
+ * To intercept these messages, use `Cabbage.addMessageListener()`:
+ *
+ * ```javascript
+ * Cabbage.addMessageListener((data) => {
+ *   if (data.command === "parameterChange") {
+ *     // Handle parameter update from DAW - update display only, don't send back!
+ *   } else if (data.command === "widgetUpdate") {
+ *     // Handle widget update from plugin, or Csound opcodes (cabbageSetValue, cabbageSet)
+ *   } else if (data.command === "channelDataUpdate") {
+ *     // Handle channel data from Csound
+ *   } else if (data.command === "resizeResponse") {
+ *     // Handle resize response
+ *   }
+ * });
+ * ```
+ *
+ * Common incoming commands:
+ * - `parameterChange` - Parameter value updated (from DAW automation or backend)
+ * - `widgetUpdate` - Widget value/property update from plugin, or Csound opcodes (cabbageSetValue, cabbageSet)
+ * - `channelDataUpdate` - Channel data from Csound
+ * - `resizeResponse` - Response to resize request
+ *
+ * ## Important: Avoiding Feedback Loops
+ *
+ * When the UI receives a `parameterChange` message from the backend, it should ONLY
+ * update its visual display. It must NEVER send a parameter update back to the backend.
+ *
+ * The reason: `parameterChange` messages represent the current value from the
+ * DAW. Sending updates back would create feedback loops and could interfere 
+ * with DAW automation playback.
+ *
+ * Correct pattern:
+ * - User drags slider -> UI sends `sendControlData()` -> DAW records automation
+ * - DAW plays automation -> Backend sends `parameterChange` -> UI updates display only
+ *
+ * ## Handling User Interaction (isDragging pattern)
+ *
+ * When the user is actively dragging a slider, you typically want to ignore incoming
+ * `parameterChange` messages to prevent the slider from "fighting" with the user's input.
+ * Implement this by tracking an `isDragging` state:
+ *
+ * ```javascript
+ * let isDragging = false;
+ *
+ * // In your slider's event handlers:
+ * slider.onpointerdown = () => { isDragging = true; };
+ * slider.onpointerup = () => { isDragging = false; };
+ *
+ * // In addMessageListener callback:
+ * Cabbage.addMessageListener((data) => {
+ *   if (data.command === "parameterChange") {
+ *     if (!isDragging) {
+ *       // Safe to update display - user isn't interacting
+ *       updateSliderDisplay(data.value);
+ *     }
+ *     // If isDragging, ignore the update - user's input takes priority
+ *   }
+ * });
+ * ```
+ *
+ * @module Cabbage
+ */
+
+
+export class Cabbage {
+
+  /**
+   * Send a widget value change to the Cabbage backend.
+   *
+   * The backend automatically determines whether the channel is DAW-automatable
+   * and routes accordingly:
+   * - Automatable channels -> DAW parameter system -> Csound
+   * - Non-automatable channels -> Csound directly
+   *
+   * **When to use**: Call this from widget event handlers (e.g., pointer events, input changes)
+   * when the user interacts with a widget.
+   *
+   * **When NOT to use**: Do not call this when handling incoming `parameterChange` messages
+   * from the backend. Those messages are for display updates only.
+   *
+   * @param {Object} data - The control data to send
+   * @param {string} data.channel - The channel name
+   * @param {number|string} data.value - The value to send in its natural/meaningful range (e.g., 20-20000 Hz for filter frequency). The backend handles all normalization needed by the host DAW. This value can be a number or string depending on the widget type.
+   * @param {string} [data.gesture="complete"] - The gesture type: "begin" (start of interaction), "value" (during interaction), "end" (end of continuous interaction), or "complete" (discrete action e.g. button click).
+   * @param {Object|null} vscode - VS Code API object (null for plugin mode)
+   */
+  static sendControlData({ channel, value, gesture = "complete" }, vscode = null) {
+    const msg = {
+      command: "controlData",
+      channel: channel,
+      value: value,
+      gesture: gesture
+    };
+
+    if (vscode !== null) {
+      vscode.postMessage(msg);
+    }
+    else {
+      if (typeof window.sendMessageFromUI === 'function') {
+        window.sendMessageFromUI(msg);
+      } else if (window.parent !== window) {
+        window.parent.postMessage(msg, '*');
+      } else {
+        console.error('Cabbage: window.sendMessageFromUI is not available. Message:', msg);
+      }
+    }
+  }
+
+
+  /**
+   * Signal that the UI is ready to load and initialize.
+   *
+   * @param {Object|null} vscode - VS Code API object (null for plugin mode)
+   * @param {Object} additionalData - Additional initialization data
+   */
+  static isReadyToLoad(vscode = null, additionalData = {}) {
+    this.sendCustomCommand("isReadyToLoad", vscode);
+  }
+  /**
+   * Send a MIDI message from the UI to the Cabbage backend.
+   *
+   * @param {number} statusByte - MIDI status byte
+   * @param {number} dataByte1 - First MIDI data byte
+   * @param {number} dataByte2 - Second MIDI data byte
+   * @param {Object|null} vscode - VS Code API object (null for plugin mode)
+   */
+  static sendMidiMessageFromUI(statusByte, dataByte1, dataByte2, vscode = null) {
+    var message = {
+      "statusByte": statusByte,
+      "dataByte1": dataByte1,
+      "dataByte2": dataByte2
+    };
+
+    const msg = {
+      command: "midiMessage",
+      obj: JSON.stringify(message)
+    };
+
+    if (vscode !== null) {
+      vscode.postMessage(msg);
+    }
+    else {
+      if (typeof window.sendMessageFromUI === 'function') {
+        window.sendMessageFromUI(msg);
+      } else if (window.parent !== window) {
+        window.parent.postMessage(msg, '*');
+      } else {
+        console.error('Cabbage: window.sendMessageFromUI is not available. Message:', msg);
+      }
+    }
+  }
+
+  /**
+   * Handle incoming MIDI messages from the backend.
+   *
+   * @param {number} statusByte - MIDI status byte
+   * @param {number} dataByte1 - First MIDI data byte
+   * @param {number} dataByte2 - Second MIDI data byte
+   */
+  static MidiMessageFromHost(statusByte, dataByte1, dataByte2) {
+  }
+
+  /**
+   * Trigger a native file open dialog for file selection widgets.
+   *
+   * @param {Object|null} vscode - VS Code API object (null for plugin mode)
+   * @param {string} channel - The associated channel name
+   * @param {Object} options - Dialog options
+   * @param {string} [options.directory] - Starting directory path
+   * @param {string} [options.filters="*"] - File filters (e.g., "*.wav;*.aiff")
+   * @param {boolean} [options.openAtLastKnownLocation=true] - Whether to open at last known location
+   */
+  static triggerFileOpenDialog(vscode, channel, options = {}) {
+    var message = {
+      "channel": channel,
+      "directory": options.directory || "",
+      "filters": options.filters || "*",
+      "openAtLastKnownLocation": options.openAtLastKnownLocation !== undefined ? options.openAtLastKnownLocation : true
+    };
+
+    const msg = {
+      command: "fileOpen",
+      obj: JSON.stringify(message)
+    };
+    if (vscode !== null) {
+      vscode.postMessage(msg);
+    }
+    else {
+      if (typeof window.sendMessageFromUI === 'function') {
+        window.sendMessageFromUI(msg);
+      } else if (window.parent !== window) {
+        window.parent.postMessage(msg, '*');
+      } else {
+        console.error('Cabbage: window.sendMessageFromUI is not available. Message:', msg);
+      }
+    }
+  }
+
+  /**
+   * Open a URL or file in the system's default application.
+   *
+   * @param {Object|null} vscode - VS Code API object (null for plugin mode)
+   * @param {string} url - URL to open
+   * @param {string} file - File path to open
+   */
+  static openUrl(vscode, url, file) {
+    var message = {
+      "url": url,
+      "file": file
+    };
+
+    const msg = {
+      command: "openUrl",
+      obj: JSON.stringify(message)
+    };
+    if (vscode !== null) {
+      vscode.postMessage(msg);
+    }
+    else {
+      if (typeof window.sendMessageFromUI === 'function') {
+        window.sendMessageFromUI(msg);
+      } else if (window.parent !== window) {
+        window.parent.postMessage(msg, '*');
+      } else {
+        console.error('Cabbage: window.sendMessageFromUI is not available. Message:', msg);
+      }
+    }
+  }
+
+  /**
+   * Request a resize of the plugin GUI window.
+   * This is only supported in plugin mode (CLAP/VST3/AUv2).
+   * The host may accept or reject the resize request.
+   *
+   * @param {number} width - The requested width in pixels
+   * @param {number} height - The requested height in pixels
+   * @param {object} vscode - The vscode API object (null for plugin mode)
+   *
+   * The response will be sent via hostMessageCallback with:
+   * {command: "resizeResponse", accepted: boolean, width: number, height: number}
+   */
+  static requestResize(width, height, vscode = null) {
+    const msg = {
+      command: "requestResize",
+      width: width,
+      height: height
+    };
+
+    if (vscode !== null) {
+      // In VS Code extension mode, resize is not supported via this mechanism
+      console.warn('Cabbage: requestResize is not supported in VS Code extension mode');
+      return;
+    }
+    else {
+      if (typeof window.sendMessageFromUI === 'function') {
+        window.sendMessageFromUI(msg);
+      } else if (window.parent !== window) {
+        window.parent.postMessage(msg, '*');
+      } else {
+        console.error('Cabbage: window.sendMessageFromUI is not available. Message:', msg);
+      }
+    }
+  }
+
+
+  /**
+   * Control whether keyboard events are captured by the webview or forwarded
+   * to the host DAW. Only relevant on Windows in plugin mode.
+   *
+   * By default (false), all key events are forwarded to the DAW so that
+   * keyboard shortcuts continue to work while the plugin UI has focus.
+   * Set to true when a custom text-entry widget (that is not a native
+   * <input> or <textarea>) needs keyboard input, then restore to false
+   * when the widget loses focus.
+   *
+   * Note: Native <input> and <textarea> elements are handled automatically
+   * and do not require calling this function.
+   *
+   * @param {boolean} consume - true to capture keys in webview, false to pass through to DAW
+   *
+   * @example
+   * myCustomEditor.addEventListener('focus', () => Cabbage.consumeKeypresses(true));
+   * myCustomEditor.addEventListener('blur',  () => Cabbage.consumeKeypresses(false));
+   */
+  static consumeKeypresses(consume) {
+    if (typeof window.consumeKeypresses === 'function') {
+      window.consumeKeypresses(consume);
+    }
+  }
+
+
+  /**
+     * Send channel data directly to Csound without DAW automation involvement.
+     *
+     * @param {string} channel - The Csound channel name
+     * @param {number|string} data - The data to send (number or string)
+     * @param {Object|null} vscode - VS Code API object (null for plugin mode)
+     */
+  static sendChannelData(channel, data, vscode = null) {
+    var message = {
+      "channel": channel
+    };
+
+    // Determine if data is a string or number and set appropriate property
+    if (typeof data === "string") {
+      message.stringData = data;
+    } else if (typeof data === "number") {
+      message.floatData = data;
+    } else {
+      console.warn("Cabbage: sendChannelData received unsupported data type:", typeof data);
+      return;
+    }
+
+    const msg = {
+      command: "channelData",
+      obj: JSON.stringify(message)
+    };
+
+    if (vscode !== null) {
+      vscode.postMessage(msg);
+    }
+    else {
+      if (typeof window.sendMessageFromUI === 'function') {
+        window.sendMessageFromUI(msg);
+      } else if (window.parent !== window) {
+        window.parent.postMessage(msg, '*');
+      } else {
+        console.error('Cabbage: window.sendMessageFromUI is not available. Message:', msg);
+      }
+    }
+  }
+
+  /**
+   * Send a widget property update to the Cabbage backend.
+   *
+   * The packet is merge-patched into the stored widget object, so this is the
+   * recommended way for a custom frontend to update widget properties such as
+   * `bounds` or `visible` at runtime. It is the counterpart to
+   * `sendControlData()`: values travel through `sendControlData()`, everything
+   * else travels through here.
+   *
+   * Merge-patch semantics: only the supplied properties are merged, but a
+   * `null` value deletes its key and arrays replace wholesale — always send
+   * complete arrays. Values cannot travel this way: `value` and `range.value`
+   * are stripped before sending, along with binding and runtime keys.
+   * Fire-and-forget: the backend applies the patch without echoing it back,
+   * and unknown ids fail silently.
+   *
+   * @param {Object} widget - Widget packet. Must identify the widget with an
+   * `id` (top-level or any `channels[].id`) plus the properties to change.
+   * @param {Object|null} vscode - VS Code API object (null for plugin mode)
+   */
+  static sendWidgetUpdate(widget, vscode = null) {
+    const msg = {
+      command: "widgetStateUpdate",
+      obj: JSON.stringify(CabbageUtils.sanitizeForEditor(widget))
+    };
+    if (vscode !== null) {
+      vscode.postMessage(msg);
+    }
+    else {
+      if (typeof window.sendMessageFromUI === 'function') {
+        window.sendMessageFromUI(msg);
+      } else if (window.parent !== window) {
+        window.parent.postMessage(msg, '*');
+      } else {
+        console.error('Cabbage: window.sendMessageFromUI is not available. Message:', msg);
+      }
+    }
+  }
+
+  /**
+   * Send a custom command to the Cabbage backend.
+   *
+   * @param {string} command - The command name to send
+   * @param {Object|null} vscode - VS Code API object (null for plugin mode)
+   * @param {Object} additionalData - Additional data to include in the command
+   */
+  /**
+   * Parse a backend `widgetJson` string dump into an object.
+   *
+   * @param {string} widgetJson - JSON string from a `widgetUpdate` payload.
+   * @returns {Object|null} Parsed widget object, or null if unparseable.
+   */
+  static parseWidgetJson(widgetJson) {
+    if (typeof widgetJson !== 'string') {
+      return null;
+    }
+    try {
+      const obj = JSON.parse(widgetJson);
+      return (obj && typeof obj === 'object') ? obj : null;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Extract a channel value from a `widgetUpdate`-style payload.
+   *
+   * The backend sends values in two shapes:
+   * - Value-only: `{ command: "widgetUpdate", id, value }`
+   * - Full dump: `{ command: "widgetUpdate", id, widgetJson }` where the
+   *   value lives nested at `channels[].range.value` (mirrors what the
+   *   native `WidgetManager` reads). A top-level `value` in the dump is
+   *   accepted as a fallback.
+   * Batch entries (`batchWidgetUpdate` → `widgets[]`) use the same shapes.
+   *
+   * @param {Object} data - `msg.data ?? msg`, or a single batch entry.
+   * @param {string|null} [channelId] - Channel to look up inside `widgetJson`.
+   *   Defaults to `data.id`.
+   * @returns {number|string|undefined} The value, or undefined if not found.
+   *
+   * @example
+   * Cabbage.addMessageListener((msg) => {
+   *   const data = msg.data ?? msg;
+   *   if (msg.command === 'widgetUpdate') {
+   *     const value = Cabbage.extractValue(data, data.id);
+   *     if (value !== undefined) { ... }
+   *   } else if (msg.command === 'batchWidgetUpdate') {
+   *     for (const w of msg.widgets ?? []) {
+   *       const value = Cabbage.extractValue(w, w.id);
+   *       if (value !== undefined) { ... }
+   *     }
+   *   }
+   * });
+   */
+  static extractValue(data, channelId = null) {
+    if (!data || typeof data !== 'object') {
+      return undefined;
+    }
+    if (data.value !== undefined) {
+      return data.value;
+    }
+    const widget = Cabbage.parseWidgetJson(data.widgetJson);
+    if (!widget) {
+      return undefined;
+    }
+    const id = channelId ?? data.id ?? null;
+    const channels = Array.isArray(widget.channels) ? widget.channels : null;
+    if (channels) {
+      let channel = null;
+      if (id !== null && id !== undefined) {
+        channel = channels.find((c) => c && c.id === id) ?? null;
+      }
+      if (!channel) {
+        channel = channels[0] ?? null;
+      }
+      if (channel && channel.range && channel.range.value !== undefined) {
+        return channel.range.value;
+      }
+      if (channel && channel.value !== undefined) {
+        return channel.value;
+      }
+    }
+    if (widget.value !== undefined) {
+      return widget.value;
+    }
+    return undefined;
+  }
+
+  /**
+   * Register a listener for incoming messages from the Cabbage backend.
+   *
+   * Abstracts the two environments so that the same UI code works everywhere:
+   * - **VS Code (iframe relay)**: messages arrive as window `message` events
+   *   from the parent/extension (`event.source !== window`).
+   * - **Native plugin (DAW)**: the backend calls `window.postMessage(msg)` on
+   *   its own window via evaluateJavascript, which dispatches a `message`
+   *   event with `event.source === window`. UI->backend traffic uses the
+   *   native `window.sendMessageFromUI` binding (not `window.postMessage`),
+   *   so accepting self-posts cannot echo our own outgoing messages.
+   *
+   * Any `message` event whose payload (or JSON-parsed string payload) is an
+   * object with a non-empty string `command` field is forwarded to the
+   * callback, regardless of `event.source`.
+   *
+   * @param {function(Object): void} callback - Called with the message object.
+   *   Common message shapes:
+   *   - `{ command: "parameterChange", data: { paramIdx, value } }` (data may be top-level or nested)
+   *   - `{ command: "widgetUpdate", id, value }` (from cabbageSetValue / cabbageSet)
+   *   - `{ command: "widgetUpdate", id, widgetJson }` (full widget update, e.g. initial state)
+   *   - `{ command: "batchWidgetUpdate", widgets: [{ id, value?, widgetJson? }] }` (session restore)
+   *   - `{ command: "channelDataUpdate", data: { channel, value } }`
+   *   Use `Cabbage.extractValue()` to read values from `widgetUpdate` /
+   *   `batchWidgetUpdate` payloads without reimplementing channel lookup.
+   * @returns {function(): void} Cleanup function — call it when the UI is torn down.
+   *
+   * @example <caption>Vanilla HTML</caption>
+   * import { Cabbage } from './cabbage/cabbage.js';
+   * Cabbage.addMessageListener((msg) => {
+   *   const data = msg.data ?? msg;
+   *   if (msg.command === 'parameterChange') { ... }
+   * });
+   *
+   * @example <caption>Svelte</caption>
+   * import { onMount, onDestroy } from 'svelte';
+   * let remove;
+   * onMount(() => { remove = Cabbage.addMessageListener((msg) => { ... }); });
+   * onDestroy(() => remove?.());
+   */
+  static addMessageListener(callback) {
+    const handler = (event) => {
+      let data = event.data;
+      // Native UI sends string payloads in some hosts — match main.js behaviour.
+      if (typeof data === 'string') {
+        try {
+          data = JSON.parse(data);
+        } catch {
+          return;
+        }
+      }
+      if (!data || typeof data.command !== 'string' || data.command.length === 0) {
+        return;
+      }
+      callback(data);
+    };
+    window.addEventListener('message', handler);
+
+    // Kept for backwards compatibility — nothing in the current backend
+    // calls it (backend uses window.postMessage), but custom hosts might.
+    window.hostMessageCallback = callback;
+
+    return () => {
+      window.removeEventListener('message', handler);
+      if (window.hostMessageCallback === callback) {
+        window.hostMessageCallback = null;
+      }
+    };
+  }
+
+  static sendCustomCommand(command, vscode = null, additionalData = {}) {
+    const msg = {
+      command: command,
+      text: JSON.stringify(additionalData)
+    };
+
+    if (vscode !== null) {
+      vscode.postMessage(msg);
+    }
+    else {
+      if (typeof window.sendMessageFromUI === 'function') {
+        try {
+          const result = window.sendMessageFromUI(msg);
+        } catch (err) {
+          console.error('Cabbage: sendMessageFromUI threw error:', err);
+          console.error('Cabbage: Error stack:', err.stack);
+        }
+      } else if (window.parent !== window) {
+        window.parent.postMessage(msg, '*');
+      } else {
+        console.error('Cabbage: window.sendMessageFromUI is not available yet. Message:', msg);
+        console.error('Cabbage: typeof window.sendMessageFromUI:', typeof window.sendMessageFromUI);
+        console.error('Cabbage: window.sendMessageFromUI value:', window.sendMessageFromUI);
+      }
+    }
+  }
+}

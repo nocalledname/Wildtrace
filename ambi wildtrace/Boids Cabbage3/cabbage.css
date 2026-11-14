@@ -1,0 +1,934 @@
+.draggable {
+	width: auto;
+	border-radius: 0px;
+	border-color: #e0e0e03c;
+	border-style: solid;
+	border-width: 1px;
+	stroke-width: 0;
+	margin: 0;
+	display: inline-block;
+	margin: 0;
+	padding-right: 0px;
+	border: 10;
+	background-color: rgba(34, 153, 238, 0);
+	color: white;
+	font-size: 20px;
+	font-family: sans-serif;
+	position: absolute;
+	touch-action: none;
+	/* This makes things *much* easier */
+	box-sizing: border-box;
+	z-index: 9999;
+	-webkit-user-select: none;
+	-moz-user-select: none;
+	-ms-user-select: none;
+	user-select: none;
+
+}
+
+.nonDraggable {
+	width: auto;
+	border-radius: 0px;
+	border-color: #a5a5a500;
+	border-style: dashed;
+	stroke-width: 0;
+	border-width: 1px;
+	margin: 0;
+	padding: 0;
+	background-color: rgba(34, 153, 238, 0);
+	color: white;
+	font-size: 20px;
+	font-family: sans-serif;
+	position: absolute;
+	touch-action: none;
+	/* This makes things *much* easier */
+	box-sizing: border-box;
+	z-index: 9999;
+	-webkit-user-select: none;
+	-moz-user-select: none;
+	-ms-user-select: none;
+	user-select: none;
+}
+
+
+.lasso-rectangle {
+	border: 2px dashed blue;
+	/* Style of the lasso rectangle */
+	pointer-events: none;
+	/* Ensure the rectangle does not interfere with pointer events */
+}
+
+.selection-box {
+	background-color: rgba(255, 0, 0, 0.3);
+}
+
+.selected {
+	border: 1px dashed #000;
+	border-radius: 0px;
+	margin-right: 0;
+	box-sizing: border-box;
+	/* Include padding and border in element's total width and height */
+}
+
+#parent {
+	display: flex;
+	/* border: 1px solid #000; */
+	height: 100vh;
+	width: 100%;
+	padding: 0px;
+}
+
+#LeftPanel {
+	flex: 1;
+	position: relative;
+	overflow: auto;
+	box-sizing: border-box;
+}
+
+#RightPanel {
+	padding: 0px;
+	position: relative;
+	z-index: 9999;
+	width: 300px;
+	height: 100%;
+	box-sizing: border-box;
+	flex-shrink: 0;
+}
+
+.form {
+	height: 300px;
+	width: 500px;
+	border-radius: 2px;
+	margin: 0;
+	padding: 0;
+	border: 0;
+	z-index: 0 !important;
+}
+
+.wrapper {
+	visibility: hidden;
+	position: absolute;
+	width: 100px;
+	z-index: 99999;
+	border-radius: 5px;
+	background: #fff;
+	padding-top: 5px;
+	box-shadow: 0 12px 35px rgba(0, 0, 0, 0.1);
+}
+
+/* Dark theme for wrapper */
+.vscode-dark .wrapper {
+	background: #2d2d30;
+	box-shadow: 0 12px 35px rgba(0, 0, 0, 0.3);
+}
+
+.wrapper .menu {
+	/* padding: 10px 12px; */
+	margin: 0;
+	padding: 5px;
+	list-style-type: none;
+	height: 340px;
+}
+
+.content .menuItem {
+	list-style: none;
+	font-size: 12px;
+	height: 30px;
+	display: flex;
+	width: 100%;
+	cursor: pointer;
+	align-items: center;
+	border-radius: 5px;
+	margin-bottom: 2px;
+	padding: 0 2px 0 2px;
+	color: #1d1d1d;
+}
+
+/* Dark theme for menu items */
+.vscode-dark .content .menuItem {
+	color: #cccccc;
+}
+
+.content .menuItem:hover {
+	background: #f2f2f2;
+}
+
+/* Dark theme for menu item hover */
+.vscode-dark .content .menuItem:hover {
+	background: #094771;
+}
+
+.content .menuItem span {
+	margin-left: 2px;
+	font-size: 12px;
+	color: inherit;
+}
+
+.resizeOnly {
+	width: 100%;
+	padding: 0px;
+}
+
+/* Explicitly style the scrollbar within your widget */
+.widget-menu {
+	overflow: auto;
+	/* Ensure scrolling is enabled */
+}
+
+.widget-menu::-webkit-scrollbar {
+	width: 10px;
+	height: 10px;
+}
+
+.widget-menu::-webkit-scrollbar-track {
+	background: #f0f0f0 !important;
+	/* Override dark theme background */
+}
+
+.widget-menu::-webkit-scrollbar-thumb {
+	background-color: #888 !important;
+	/* Use a lighter thumb color */
+	border-radius: 5px;
+	border: 2px solid #f0f0f0 !important;
+	/* Ensure contrast */
+}
+
+/* Optional for hover effect */
+.widget-menu::-webkit-scrollbar-thumb:hover {
+	background-color: #555 !important;
+}
+
+/* Dark theme scrollbar */
+.vscode-dark .widget-menu::-webkit-scrollbar-track {
+	background: #2d2d30 !important;
+}
+
+.vscode-dark .widget-menu::-webkit-scrollbar-thumb {
+	background-color: #555 !important;
+	border: 2px solid #2d2d30 !important;
+}
+
+.vscode-dark .widget-menu::-webkit-scrollbar-thumb:hover {
+	background-color: #777 !important;
+}
+
+/* Number input spinner controls (up/down arrows) */
+.property input[type="number"]::-webkit-outer-spin-button,
+.property input[type="number"]::-webkit-inner-spin-button {
+	opacity: 1;
+	height: 20px;
+	width: 16px;
+	cursor: pointer;
+}
+
+.property input[type="number"]::-webkit-inner-spin-button:hover {
+	background-color: rgba(0, 0, 0, 0.1);
+}
+
+/* Dark theme for number input spinners */
+.vscode-dark .property input[type="number"]::-webkit-inner-spin-button {
+	filter: invert(1) brightness(0.8);
+}
+
+.vscode-dark .property input[type="number"]::-webkit-inner-spin-button:hover {
+	background-color: rgba(255, 255, 255, 0.1);
+	filter: invert(1) brightness(1);
+}
+
+/*
+	dark theme
+
+   .property-panel {
+	width: 200px;
+	padding: 0;
+	border: 1px solid #333; 
+	border-radius: 3px;
+	background-color: #1e1e1e; 
+	overflow-y: auto;
+	visibility: hidden;
+	z-index: 9999;
+}
+
+.property {
+	margin: 0;
+	display: flex;
+	align-items: center;
+	border-bottom: 1px solid #333; 
+	padding: 0;
+}
+
+.property:last-child {
+	border-bottom: none;
+}
+
+.property label {
+	flex: 3;
+	font-size: 12px; 
+	margin: 0;
+	margin-right: 10px;
+	text-align: right;
+	font-weight: bold;
+	color: #d4d4d4; 
+}
+
+.property input {
+	flex: 2;
+	font-size: 12px; 
+	padding: 5px;
+	border: 1px solid #333; 
+	border-radius: 3px;
+	width: 100%;
+	color: #d4d4d4; 
+	background-color: #333; 
+}
+
+.property input[type="color"] {
+	flex: 1;
+	border: 1px solid #333; 
+	font-size: 12px; 
+	padding: 0px;
+	width: 100%;
+} */
+
+/* Light theme styles (default) */
+.property-panel {
+	width: 100%;
+	height: 100%;
+	padding: 0;
+	border: 1px solid #cfcfcf;
+	border-radius: 3px;
+	background-color: #ffffff;
+	overflow: auto;
+	display: flex;
+	flex-direction: column;
+}
+
+.property-section {
+	margin-bottom: 10px;
+	text-align: center;
+	padding: 5px 0;
+}
+
+.property-section h3 {
+	margin: 0;
+	font-size: 14px;
+	color: #333333;
+	background-color: #f0f0f0;
+	margin-bottom: 10px;
+}
+
+.property {
+	margin: 0;
+	display: flex;
+	align-items: center;
+	padding: 0;
+	background-color: #ffffff;
+}
+
+.property label {
+	flex: 3;
+	font-size: 12px;
+	margin: 0;
+	margin-right: 10px;
+	text-align: right;
+	font-weight: bold;
+	color: #333333;
+}
+
+.property input,
+.property select {
+	flex: 2;
+	font-size: 12px;
+	padding: 5px;
+	border: 1px solid #cfcfcf;
+	border-radius: 3px;
+	width: 100%;
+	color: #333333;
+	background-color: #f0f0f0;
+}
+
+.property input[type="color"] {
+	flex: 1;
+	border: 1px solid #cfcfcf;
+	font-size: 12px;
+	padding: 0;
+	width: 100%;
+	height: 32px;
+	/* Ensure color input has the same height */
+}
+
+/* Dark theme styles */
+.vscode-dark .property-panel {
+	border: 1px solid #333;
+	background-color: #1e1e1e;
+}
+
+.vscode-dark .property-section h3 {
+	color: #d4d4d4;
+	background-color: #333;
+}
+
+.vscode-dark .property {
+	background-color: #1e1e1e;
+	border-bottom: 1px solid #555;
+}
+
+.vscode-dark .property:last-child {
+	border-bottom: none;
+}
+
+.vscode-dark .property label {
+	color: #d4d4d4;
+}
+
+.vscode-dark .property input,
+.vscode-dark .property select {
+	border: 1px solid #333;
+	color: #d4d4d4;
+	background-color: #333;
+}
+
+.vscode-dark .property input[type="color"] {
+	border: 1px solid #333;
+}
+
+.full-screen-div {
+	position: fixed;
+	top: 0;
+	left: 0;
+	width: 100%;
+	height: 100%;
+	background: #ffffff;
+	/* Semi-transparent background */
+	z-index: 9999;
+	/* Ensure it's above other content */
+	display: flex;
+	justify-content: center;
+	align-items: center;
+	user-select: none;
+	/* Prevent text selection in the full-screen div */
+}
+
+/* Dark theme for full-screen div */
+.vscode-dark .full-screen-div {
+	background: #1e1e1e;
+}
+
+.full-screen-div svg {
+	max-width: 90%;
+	max-height: 90%;
+}
+
+.popup {
+	position: absolute;
+	top: -30px;
+	background-color: #333;
+	/* color: #3c5600; */
+	color: white;
+	padding: 5px;
+	border-radius: 5px;
+	display: none;
+	z-index: 1000000;
+	opacity: 0;
+	transition: opacity 0.3s ease-in-out;
+	pointer-events: none;
+	/* Prevent pointer events while hidden */
+	user-select: none;
+	/* Prevent text selection in the popup */
+}
+
+.popup-value {
+	user-select: none;
+	/* Prevent text selection */
+	-webkit-user-select: none;
+	/* For Safari */
+	-moz-user-select: none;
+	/* For Firefox */
+	-ms-user-select: none;
+	/* For Internet Explorer/Edge */
+
+	/* Font properties */
+	font-family: 'Verdana', sans-serif;
+	/* Change to your desired font */
+	font-size: 14px;
+	/* Change to your desired font size */
+	color: #ffffff;
+	/* Change to your desired text color */
+	/* Add any other font properties you want, such as font-weight, line-height, etc. */
+}
+
+.popup::after {
+	content: '';
+	position: absolute;
+	top: 50%;
+	left: -20px;
+	margin-top: -10px;
+	border-width: 10px;
+	border-style: solid;
+	border-color: transparent #333 transparent transparent;
+	/* Arrow pointing left */
+}
+
+.popup.right::after {
+	left: auto;
+	right: -20px;
+	/* Position the arrow */
+	border-color: transparent transparent transparent #333;
+	/* Arrow pointing right */
+}
+
+
+.popup.above::after {
+	content: '';
+	/* Ensure the pseudo-element is created */
+	position: absolute;
+	top: 24px;
+	/* Position the arrow at the top of the popup */
+	left: 50%;
+	/* Center the arrow horizontally */
+	margin-left: -10px;
+	/* Center the arrow by adjusting its position */
+	width: 0;
+	/* No width */
+	height: 0;
+	/* No height */
+	clip-path: polygon(50% 100%, 0% 50%, 100% 50%);
+	/* Arrow shape pointing up */
+	background-color: #333;
+	/* Color of the arrow */
+}
+
+.popup.below::after {
+	content: '';
+	/* Ensure the pseudo-element is created */
+	position: absolute;
+	top: 3px;
+	/* Position the arrow at the top of the popup */
+	left: 50%;
+	/* Center the arrow horizontally */
+	margin-left: -10px;
+	/* Center the arrow by adjusting its position */
+	width: 0;
+	/* No width */
+	height: 0;
+	/* No height */
+	clip-path: polygon(50% 0%, 0% 70%, 100% 70%);
+	/* Arrow shape pointing up */
+	background-color: #333;
+	/* Color of the arrow */
+}
+
+.popup.show {
+	opacity: 1;
+}
+
+.popup.hide {
+	opacity: 0;
+}
+
+/* ============================================================
+   VU Meter
+   Absolutely positioned inside #LeftPanel so it overlays the
+   instrument without disturbing the flex layout.
+   One .vu-channel bar per output channel; a .vu-mask child
+   covers the "silent" portion while the channel track shows
+   the green→yellow→red gradient through the visible gap.
+   ============================================================ */
+
+.vu-meter {
+	position: fixed;
+	z-index: 10000;
+	display: flex;
+	gap: 3px;
+	padding: 3px;
+	background: linear-gradient(180deg, rgba(28, 31, 36, 0.92) 0%, rgba(12, 14, 18, 0.88) 100%);
+	border: 1px solid rgba(255, 255, 255, 0.12);
+	box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06),
+		inset 0 -1px 0 rgba(0, 0, 0, 0.55),
+		0 3px 10px rgba(0, 0, 0, 0.45);
+	box-sizing: border-box;
+	pointer-events: auto;
+}
+
+/* Horizontal strip: top — channels stacked one above the other */
+.vu-meter.vu-top {
+	top: 0;
+	left: 0;
+	right: 0;
+	height: 56px;
+	padding-top: 6px;
+	padding-bottom: 6px;
+	row-gap: 12px;
+	flex-direction: column;
+}
+
+/* Horizontal strip: bottom — channels stacked one above the other */
+.vu-meter.vu-bottom {
+	bottom: 0;
+	left: 0;
+	right: 0;
+	height: 56px;
+	padding-top: 6px;
+	padding-bottom: 6px;
+	row-gap: 12px;
+	flex-direction: column;
+}
+
+/* Vertical strip: left */
+.vu-meter.vu-left {
+	top: 0;
+	bottom: 0;
+	left: 0;
+	width: 44px;
+	padding-left: 2px;
+	padding-right: 2px;
+	column-gap: 14px;
+	flex-direction: row;
+}
+
+/* Vertical strip: right */
+.vu-meter.vu-right {
+	top: 0;
+	bottom: 0;
+	right: 0;
+	width: 44px;
+	padding-left: 2px;
+	padding-right: 2px;
+	column-gap: 14px;
+	flex-direction: row;
+}
+
+/* Individual channel ladder — segmented LEDs, DOM order low→high */
+.vu-meter.vu-top .vu-channel,
+.vu-meter.vu-bottom .vu-channel {
+	flex: 1;
+	display: flex;
+	flex-direction: row;
+	gap: 2px;
+	position: relative;
+	background: rgba(0, 0, 0, 0.35);
+	border-radius: 2px;
+	border: 1px solid rgba(255, 255, 255, 0.09);
+	box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.12), inset 0 -1px 0 rgba(0, 0, 0, 0.4);
+	padding: 2px;
+	overflow: hidden;
+}
+
+.vu-meter.vu-left .vu-channel,
+.vu-meter.vu-right .vu-channel {
+	flex: 1;
+	display: flex;
+	flex-direction: column-reverse;
+	gap: 2px;
+	position: relative;
+	background: rgba(0, 0, 0, 0.35);
+	border-radius: 2px;
+	border: 1px solid rgba(255, 255, 255, 0.09);
+	box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.12), inset 0 -1px 0 rgba(0, 0, 0, 0.4);
+	padding: 2px;
+	overflow: hidden;
+}
+
+/* Single LED segment — unlit track grey, heat color set inline when lit */
+.vu-seg {
+	flex: 1 1 0;
+	min-width: 0;
+	min-height: 0;
+	border-radius: 1px;
+	background: rgba(255, 255, 255, 0.10);
+}
+
+.vu-meter.vu-top .vu-seg,
+.vu-meter.vu-bottom .vu-seg {
+	min-width: 2px;
+}
+
+.vu-meter.vu-left .vu-seg,
+.vu-meter.vu-right .vu-seg {
+	min-height: 2px;
+}
+
+/* Peak-hold marker segment: bright outline (prototype .is-peak style) */
+.vu-seg.is-peak {
+	outline: 1px solid #ffffff;
+	outline-offset: 0;
+}
+
+/* Held peak after an over-0dBFS clip: red, like the prototype clip lamp */
+.vu-seg.is-peak.is-clipped {
+	background: #ff2a36 !important;
+	box-shadow: 0 0 10px rgba(255, 37, 60, 0.95), 0 0 2px rgba(255, 255, 255, 0.45) !important;
+	outline-color: #ff2a36;
+}
+
+/* RMS indicator — thin bright line at the smoothed RMS position.
+   Sits above the segments (z-index) so it stays visible when lit. */
+.vu-rms {
+	position: absolute;
+	background: #d8f3ff;
+	box-shadow: 0 0 10px rgba(173, 238, 255, 0.9), 0 0 2px rgba(255, 255, 255, 0.8);
+	z-index: 2;
+	pointer-events: none;
+}
+
+.vu-meter.vu-top .vu-rms,
+.vu-meter.vu-bottom .vu-rms {
+	width: 2px;
+	top: 0;
+	bottom: 0;
+	left: 0;
+}
+
+.vu-meter.vu-left .vu-rms,
+.vu-meter.vu-right .vu-rms {
+	height: 2px;
+	left: 0;
+	right: 0;
+	bottom: 0;
+}
+
+/* ---- dBFS scale markers ---- */
+/* Absolute overlay spanning the whole VU meter strip, pointer-events off */
+.vu-markers {
+	position: absolute;
+	top: 0;
+	left: 0;
+	right: 0;
+	bottom: 0;
+	pointer-events: none;
+	z-index: 3;
+}
+
+/* Individual tick: a 1 px line — dim white by default */
+.vu-tick {
+	position: absolute;
+	background: rgba(255, 255, 255, 0.24);
+}
+
+/* 0 dBFS tick is brighter to mark the clipping boundary */
+.vu-tick.vu-tick-zero {
+	background: #ffffff;
+	box-shadow: 0 0 8px rgba(255, 255, 255, 0.7);
+}
+
+/* Horizontal markers: each tick is a vertical 1 px line */
+.vu-markers-h .vu-tick {
+	top: 0;
+	bottom: 0;
+	width: 1px;
+}
+
+/* Horizontal labels (dBFS) */
+.vu-markers-h .vu-tick::after {
+	position: absolute;
+	top: 50%;
+	left: 50%;
+	transform: translate(-50%, -50%);
+	font-size: 9px;
+	line-height: 1;
+	font-family: var(--vscode-font-family, sans-serif);
+	color: rgba(255, 255, 255, 0.96);
+	text-shadow: 0 1px 2px rgba(0, 0, 0, 0.9), 0 0 1px rgba(0, 0, 0, 0.95);
+	background: rgba(0, 0, 0, 0.55);
+	border-radius: 2px;
+	padding: 0 2px;
+	white-space: nowrap;
+}
+
+.vu-markers-h .vu-tick:nth-child(1)::after {
+	content: "0 dB";
+	color: #ffffff;
+	font-weight: 700;
+}
+
+.vu-markers-h .vu-tick:nth-child(2)::after {
+	content: "-3";
+}
+
+.vu-markers-h .vu-tick:nth-child(3)::after {
+	content: "-6";
+}
+
+.vu-markers-h .vu-tick:nth-child(4)::after {
+	content: "-12";
+}
+
+.vu-markers-h .vu-tick:nth-child(5)::after {
+	content: "-18";
+}
+
+.vu-markers-h .vu-tick:nth-child(6)::after {
+	content: "-30";
+}
+
+.vu-markers-h .vu-tick:nth-child(7)::after {
+	content: "-40";
+}
+
+.vu-markers-h .vu-tick:nth-child(8)::after {
+	content: "-60";
+}
+
+/* Vertical markers: each tick is a horizontal 1 px line */
+.vu-markers-v .vu-tick {
+	left: 0;
+	right: 0;
+	height: 1px;
+}
+
+/* Vertical labels (dBFS) */
+.vu-markers-v .vu-tick::after {
+	position: absolute;
+	left: 50%;
+	top: 50%;
+	transform: translate(-50%, -50%);
+	font-size: 8px;
+	line-height: 1;
+	font-family: var(--vscode-font-family, sans-serif);
+	color: rgba(255, 255, 255, 0.96);
+	text-shadow: 0 1px 2px rgba(0, 0, 0, 0.9), 0 0 1px rgba(0, 0, 0, 0.95);
+	background: rgba(0, 0, 0, 0.55);
+	border-radius: 2px;
+	padding: 0 2px;
+	white-space: nowrap;
+}
+
+.vu-markers-v .vu-tick:nth-child(1)::after {
+	content: "0";
+	color: #ffffff;
+	font-weight: 700;
+}
+
+.vu-markers-v .vu-tick:nth-child(2)::after {
+	content: "-3";
+}
+
+.vu-markers-v .vu-tick:nth-child(3)::after {
+	content: "-6";
+}
+
+.vu-markers-v .vu-tick:nth-child(4)::after {
+	content: "-12";
+}
+
+.vu-markers-v .vu-tick:nth-child(5)::after {
+	content: "-18";
+}
+
+.vu-markers-v .vu-tick:nth-child(6)::after {
+	content: "-30";
+}
+
+.vu-markers-v .vu-tick:nth-child(7)::after {
+	content: "-40";
+}
+
+.vu-markers-v .vu-tick:nth-child(8)::after {
+	content: "-60";
+}
+
+/* ---- text readouts (peak / RMS / overs) ---- */
+/* Compact mono strip; hidden unless the vuMeterShowReadouts setting is on */
+.vu-readouts {
+	display: flex;
+	gap: 8px;
+	align-items: center;
+	position: absolute;
+	right: 6px;
+	top: 50%;
+	transform: translateY(-50%);
+	font-family: var(--vscode-font-family, monospace);
+	font-size: 10px;
+	line-height: 1;
+	color: rgba(255, 255, 255, 0.9);
+	text-shadow: 0 1px 2px rgba(0, 0, 0, 0.9);
+	background: rgba(0, 0, 0, 0.55);
+	border-radius: 3px;
+	padding: 3px 6px;
+	white-space: nowrap;
+	z-index: 4;
+	pointer-events: none;
+}
+
+.vu-meter.vu-left .vu-readouts,
+.vu-meter.vu-right .vu-readouts {
+	right: auto;
+	top: auto;
+	bottom: 6px;
+	left: 50%;
+	transform: translateX(-50%);
+	flex-direction: column;
+	gap: 4px;
+}
+
+.vu-readouts .vu-ro-k {
+	color: rgba(255, 255, 255, 0.55);
+}
+
+.vu-readouts.is-clipped {
+	color: #ff6b74;
+}
+
+.vu-meter.vu-no-readouts .vu-readouts {
+	display: none;
+}
+
+/* ---- light theme (body.vscode-light is kept in sync by VS Code, so this
+   applies live on theme switch with no reload needed) ---- */
+body.vscode-light .vu-meter {
+	background: linear-gradient(180deg, rgba(255, 255, 255, 0.96) 0%, rgba(238, 240, 243, 0.94) 100%);
+	border: 1px solid rgba(0, 0, 0, 0.16);
+	box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.9),
+		inset 0 -1px 0 rgba(0, 0, 0, 0.08),
+		0 3px 10px rgba(0, 0, 0, 0.18);
+}
+
+body.vscode-light .vu-meter .vu-channel {
+	background: rgba(0, 0, 0, 0.10);
+	border-color: rgba(0, 0, 0, 0.14);
+	box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.12);
+}
+
+body.vscode-light .vu-meter .vu-seg {
+	background: rgba(0, 0, 0, 0.13);
+}
+
+body.vscode-light .vu-meter .vu-tick {
+	background: rgba(0, 0, 0, 0.35);
+}
+
+body.vscode-light .vu-meter .vu-tick.vu-tick-zero {
+	background: #111111;
+	box-shadow: 0 0 6px rgba(0, 0, 0, 0.4);
+}
+
+body.vscode-light .vu-markers-h .vu-tick::after,
+body.vscode-light .vu-markers-v .vu-tick::after {
+	color: #1a1a1a;
+	text-shadow: none;
+	background: rgba(255, 255, 255, 0.78);
+}
+
+/* White RMS line is invisible on a light track — use dark teal instead */
+body.vscode-light .vu-meter .vu-rms {
+	background: #0d4a63;
+	box-shadow: 0 0 6px rgba(13, 74, 99, 0.55);
+}
+
+body.vscode-light .vu-meter .vu-seg.is-peak {
+	outline-color: #111111;
+}
+
+body.vscode-light .vu-meter .vu-readouts {
+	color: #1a1a1a;
+	text-shadow: none;
+	background: rgba(255, 255, 255, 0.82);
+}
+
+body.vscode-light .vu-meter .vu-readouts .vu-ro-k {
+	color: rgba(0, 0, 0, 0.55);
+}
+
+body.vscode-light .vu-meter .vu-readouts.is-clipped {
+	color: #b3121f;
+}

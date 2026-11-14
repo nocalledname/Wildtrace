@@ -1,0 +1,1640 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Cab3-Quad-Orbita</title>
+<style>
+    :root {
+        --bg: #04060e;
+        --navy: #001030;
+        --navy2: #081430;
+        --orange: #ff6b3d;
+        --orange-soft: rgba(255, 107, 61, .32);
+        --amber: #ffcd44;
+        --hair: rgba(255, 205, 68, .10);
+        --hair2: rgba(255, 205, 68, .24);
+        --dim: rgba(226, 232, 248, .42);
+        --faint: rgba(226, 232, 248, .16);
+        --mono: "SF Mono", ui-monospace, "JetBrains Mono", Menlo, Consolas, monospace;
+        --lvl: 0;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    /* html/body 禁止滚动：任何滚动都会让指针坐标与元素错位。
+       body 是视口容器（居中 .canvas + 钉住缩放三角），
+       .canvas 是 320x470 的设计画布，整体由 --zoom 缩放。 */
+    html, body {
+        width: 100%;
+        height: 100%;
+        overflow: hidden;
+        background: var(--bg);
+    }
+
+    body {
+        --zoom: 1;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        position: relative;
+    }
+
+    .canvas {
+        width: 320px;
+        height: 470px;
+        flex: none;
+        padding: 14px 16px 10px;
+        transform: scale(var(--zoom));
+        transform-origin: center center;
+        display: flex;
+        flex-direction: column;
+        color: #e8ecf8;
+        font-family: -apple-system, "Helvetica Neue", "PingFang SC", Arial, sans-serif;
+        font-size: 10px;
+        user-select: none;
+        -webkit-user-select: none;
+        -webkit-touch-callout: none;
+        overflow: hidden;
+        position: relative;
+        background:
+            radial-gradient(ellipse 120% 78% at 50% 30%, #07132e 0%, #04102a 42%, var(--bg) 100%);
+    }
+
+    /* 星场：极淡的固定噪点光，制造深空感 */
+    .canvas::before {
+        content: "";
+        position: absolute;
+        inset: 0;
+        pointer-events: none;
+        z-index: 0;
+        opacity: .55;
+        background-image:
+            radial-gradient(1px 1px at 18% 12%, rgba(190, 210, 255, .30) 50%, transparent 51%),
+            radial-gradient(1px 1px at 74% 8%, rgba(190, 210, 255, .22) 50%, transparent 51%),
+            radial-gradient(1px 1px at 88% 26%, rgba(190, 210, 255, .18) 50%, transparent 51%),
+            radial-gradient(1px 1px at 8% 34%, rgba(190, 210, 255, .16) 50%, transparent 51%),
+            radial-gradient(1px 1px at 42% 6%, rgba(190, 210, 255, .20) 50%, transparent 51%),
+            radial-gradient(1px 1px at 62% 20%, rgba(190, 210, 255, .14) 50%, transparent 51%);
+    }
+
+    /* 底部压暗，把旋钮区沉下去 */
+    .canvas::after {
+        content: "";
+        position: absolute;
+        inset: 0;
+        pointer-events: none;
+        z-index: 0;
+        background: linear-gradient(to bottom, transparent 52%, rgba(2, 4, 10, .72) 100%);
+    }
+
+    .canvas > * { position: relative; z-index: 1; }
+
+    /* ---------------- 顶栏 ---------------- */
+    header {
+        flex: none;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding-bottom: 9px;
+        border-bottom: 1px solid rgba(255, 205, 68, .07);
+    }
+    .mark { display: flex; align-items: center; gap: 8px; }
+    .mark svg { display: block; width: 13px; height: 13px; }
+
+    .brand {
+        font-size: 11px;
+        font-weight: 600;
+        letter-spacing: .42em;
+        line-height: 1;
+    }
+    .tag {
+        font-family: var(--mono);
+        font-size: 7px;
+        letter-spacing: .30em;
+        color: rgba(255, 205, 68, .55);
+        text-transform: uppercase;
+        padding-top: 1px;
+    }
+
+    /* ---------------- 轨道区 ---------------- */
+    .stage {
+        flex: none;
+        margin-top: 11px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 11px;
+    }
+
+    /* ===== 电平表：表柱 + dB 标尺（与 Stasis 同一套，见模板 §6.15） =====
+       电平按 dB 映射：0 dB 在顶、-60 dB 在底。标尺刻度由 JS 按 dB 位置生成。
+       L 表：柱在内、刻度在外；R 表镜像。 */
+    .metercol { display: flex; flex-direction: column; align-items: center; gap: 5px; }
+    .metercol > span {
+        height: 8px;
+        font-family: var(--mono);
+        font-size: 6px;
+        line-height: 8px;
+        letter-spacing: .18em;
+        color: rgba(255, 205, 68, .38);
+    }
+
+    .meterbody { display: flex; align-items: stretch; gap: 3px; }
+    .meterbody.mirror { flex-direction: row-reverse; }
+
+    .bar { position: relative; width: 11px; height: 154px; flex: none; }
+    .bar::before, .bar::after {
+        content: "";
+        position: absolute;
+        top: 0; bottom: 0;
+        width: 1px;
+        background: rgba(255, 205, 68, .13);
+    }
+    .bar::before { left: 0; }
+    .bar::after { right: 0; }
+    .bar i {
+        position: absolute;
+        left: 1px; right: 1px; bottom: 0;
+        height: 100%;
+        transform-origin: bottom center;
+        transform: scaleY(0);
+        background: linear-gradient(to top,
+            rgba(255, 107, 61, .92) 0%,
+            rgba(255, 140, 70, .72) 46%,
+            rgba(255, 205, 68, .82) 100%);
+        transition: transform .05s linear;
+        will-change: transform;
+    }
+    /* 峰值亮帽 */
+    .bar b {
+        position: absolute;
+        left: 0; right: 0;
+        height: 1px;
+        bottom: 0;
+        background: rgba(255, 226, 150, .95);
+        transform: translateY(0);
+        transition: transform .05s linear, opacity .12s linear;
+        opacity: 0;
+        will-change: transform;
+    }
+
+    /* dB 标尺 */
+    .dbscale { position: relative; width: 25px; height: 154px; flex: none; }
+    .dbscale .t { position: absolute; left: 0; right: 0; height: 0; }
+    .dbscale .t::before {
+        content: "";
+        position: absolute;
+        left: 0; top: 0;
+        width: 3px; height: 1px;
+        background: rgba(255, 205, 68, .30);
+    }
+    .dbscale .t.major::before { width: 5px; background: rgba(255, 205, 68, .56); }
+    .dbscale .t .n {
+        position: absolute;
+        right: 0; top: -3.4px;
+        font-family: var(--mono);
+        font-size: 6px; line-height: 1;
+        letter-spacing: .01em;
+        color: rgba(255, 205, 68, .40);
+    }
+    .dbscale .t.major .n { color: rgba(255, 205, 68, .62); }
+    .dbscale .t.zero .n { color: rgba(255, 236, 170, .86); }
+
+    /* 右表镜像：刻度贴外侧，数字靠内 */
+    .meterbody.mirror .dbscale .t::before { left: auto; right: 0; }
+    .meterbody.mirror .dbscale .t .n { right: auto; left: 0; }
+
+    .orbit {
+        width: 182px;
+        height: 182px;
+        position: relative;
+        flex: none;
+    }
+    .orbit > svg { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+
+    /* 电平驱动的环境辉光 */
+    .orbit::before {
+        content: "";
+        position: absolute;
+        inset: -18px;
+        pointer-events: none;
+        background: radial-gradient(circle at 50% 50%,
+            rgba(255, 107, 61, .16) 0%, transparent 66%);
+        opacity: calc(.45 + var(--lvl) * .55);
+        will-change: opacity;
+    }
+
+    .grid { fill: none; stroke: rgba(140, 170, 255, .085); stroke-width: 1; }
+    .grid.major { stroke: rgba(140, 170, 255, .15); }
+    .frame { fill: none; stroke: rgba(255, 205, 68, .18); stroke-width: 1; }
+    .axis { stroke: rgba(140, 170, 255, .10); stroke-width: 1; stroke-dasharray: 1 5; }
+    .path {
+        fill: none;
+        stroke: rgba(255, 205, 68, .40);
+        stroke-width: 1;
+        stroke-dasharray: 3 5;
+    }
+    .center { fill: rgba(255, 205, 68, .45); }
+
+    .ballwrap {
+        position: absolute;
+        left: 50%; top: 50%;
+        transform: translate(-50%, -50%);
+        pointer-events: none;
+        will-change: transform;
+    }
+    .ballwrap::before {
+        content: "";
+        position: absolute;
+        inset: -14px;
+        border-radius: 50%;
+        background: radial-gradient(circle,
+            rgba(255, 107, 61, .42) 0%,
+            rgba(255, 107, 61, .14) 44%,
+            transparent 72%);
+    }
+    .ballwrap::after {
+        content: "";
+        position: absolute;
+        inset: -26px;
+        border-radius: 50%;
+        background: radial-gradient(circle,
+            rgba(255, 120, 70, .10) 0%,
+            transparent 62%);
+    }
+    .ball {
+        position: relative;
+        width: 12px; height: 12px;
+        border-radius: 50%;
+        background: radial-gradient(circle at 34% 30%, #ffd9b8 0%, #ff8a52 42%, #e0501f 100%);
+        box-shadow:
+            0 0 10px 1px rgba(255, 107, 61, .62),
+            0 0 24px 4px rgba(255, 107, 61, .22);
+    }
+
+    /* ---------------- 旋钮行 ---------------- */
+    .knobs {
+        flex: none;
+        display: flex;
+        justify-content: center;
+    }
+    .knobs.r1 { margin-top: 10px; gap: 14px; }
+    .knobs.r2 { margin-top: 8px; gap: 44px; }
+
+    .knob {
+        width: 62px;
+        text-align: center;
+        cursor: ns-resize;
+        touch-action: none;
+        position: relative;
+    }
+    .knob svg { display: block; width: 54px; height: 54px; margin: 0 auto; overflow: visible; }
+    .knob .plate { fill: url(#plateGrad); }
+    .knob .gauge { fill: none; stroke: rgba(140, 170, 255, .13); stroke-width: 1.5; }
+    .knob .arc {
+        fill: none;
+        stroke: var(--orange);
+        stroke-width: 1.6;
+        stroke-linecap: round;
+        filter: drop-shadow(0 0 3px rgba(255, 107, 61, .42));
+        transition: stroke-dasharray .05s linear;
+    }
+    .knob .tick { stroke: rgba(255, 205, 68, .18); stroke-width: 1; }
+    .knob .tick.major { stroke: rgba(255, 205, 68, .40); }
+    /* 数值输入框：平时不接管指针（保证整块旋钮都能拖），单击旋钮才进入编辑 */
+    .kval {
+        position: absolute;
+        left: 50%;
+        top: 27px;
+        transform: translate(-50%, -50%);
+        width: 50px;
+        height: 15px;
+        padding: 0;
+        border: 0;
+        border-radius: 2px;
+        background: transparent;
+        color: var(--amber);
+        font-family: var(--mono);
+        font-size: 10px;
+        font-weight: 300;
+        letter-spacing: .01em;
+        text-align: center;
+        outline: none;
+        pointer-events: none;
+        -webkit-user-select: text;
+        user-select: text;
+        -webkit-appearance: none;
+        appearance: none;
+    }
+    .knob.editing { cursor: text; }
+    .knob.editing .kval {
+        pointer-events: auto;
+        background: rgba(255, 205, 68, .10);
+        box-shadow: 0 0 0 1px rgba(255, 205, 68, .55);
+    }
+    .klab {
+        margin-top: 3px;
+        font-family: var(--mono);
+        font-size: 6.5px;
+        line-height: 8px;
+        letter-spacing: .22em;
+        color: rgba(255, 205, 68, .48);
+        text-transform: uppercase;
+        white-space: nowrap;
+    }
+
+    /* ---------------- 方向 ---------------- */
+    .dirwrap {
+        /* 与旋钮圆心的垂直位置对齐：旋钮圆心在单元顶 27px，开关高 22px */
+        height: 65px;
+        padding-top: 16px;
+        position: relative;
+        flex: none;
+        text-align: center;
+    }
+    /* 标签钉在单元底部，与其它旋钮标签同基线 */
+    .dirwrap .klab {
+        position: absolute;
+        left: 0; right: 0; bottom: 0;
+        margin-top: 0;
+    }
+
+    .dir {
+        width: 46px; height: 22px;
+        flex: none;
+        display: flex;
+        border: 1px solid var(--hair2);
+        border-radius: 2px;
+        overflow: hidden;
+        cursor: pointer;
+        position: relative;
+    }
+    .dir span {
+        flex: 1;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-family: var(--mono);
+        font-size: 6.5px;
+        letter-spacing: .08em;
+        color: rgba(226, 232, 248, .38);
+        transition: background .14s ease, color .14s ease;
+        position: relative;
+        z-index: 1;
+    }
+    .dir span.on {
+        background: rgba(255, 107, 61, .18);
+        color: var(--orange);
+    }
+    .dir:hover { border-color: rgba(255, 205, 68, .42); }
+
+    .wet { width: 200px; flex: none; margin: 7px auto 0; }
+    .wet .lab {
+        font-family: var(--mono);
+        font-size: 6.5px;
+        letter-spacing: .22em;
+        color: rgba(255, 205, 68, .48);
+        text-transform: uppercase;
+        margin-bottom: 6px;
+        text-align: center;
+    }
+    .dual { position: relative; width: 100%; height: 18px; }
+    .dual .ticks {
+        position: absolute;
+        left: 0; right: 0; top: 50%;
+        height: 6px;
+        margin-top: -3px;
+        background: repeating-linear-gradient(90deg,
+            rgba(255, 205, 68, .13) 0 1px, transparent 1px 10%);
+        pointer-events: none;
+    }
+    .dual .track {
+        position: absolute;
+        left: 0; right: 0; top: 50%;
+        height: 1px; margin-top: -0.5px;
+        background: rgba(255, 205, 68, .18);
+    }
+    .dual .range {
+        position: absolute;
+        top: 50%;
+        height: 1px;
+        margin-top: -0.5px;
+        background: var(--orange);
+        box-shadow: 0 0 8px rgba(255, 107, 61, .45);
+    }
+    .dual .thumb {
+        position: absolute;
+        top: 50%;
+        width: 8px; height: 8px;
+        margin-top: -4px;
+        margin-left: -4px;
+        border-radius: 50%;
+        background: #08101f;
+        border: 1px solid rgba(255, 205, 68, .58);
+        cursor: ew-resize;
+        touch-action: none;
+        transition: border-color .14s ease, box-shadow .14s ease, transform .1s ease;
+    }
+    .dual .thumb:hover {
+        border-color: var(--orange);
+        box-shadow: 0 0 0 3px rgba(255, 107, 61, .10), 0 0 10px rgba(255, 107, 61, .40);
+    }
+    .dual .thumb:active { transform: scale(1.14); }
+    .wet .vals {
+        display: flex;
+        justify-content: space-between;
+        margin-top: 5px;
+        font-family: var(--mono);
+        font-size: 7.5px;
+        font-weight: 300;
+        /* 与旋钮数值同为琥珀色，避免同一组里出现两套文字色 */
+        color: var(--amber);
+        letter-spacing: .06em;
+    }
+    .wet .vals input {
+        width: 40px;
+        padding: 1px 3px;
+        border: 0;
+        border-radius: 2px;
+        background: transparent;
+        color: var(--amber);
+        font: inherit;
+        letter-spacing: inherit;
+        text-align: left;
+        outline: none;
+        -webkit-user-select: text;
+        user-select: text;
+        -webkit-appearance: none;
+        appearance: none;
+    }
+    .wet .vals input:last-child { text-align: right; }
+    .wet .vals input:focus {
+        background: rgba(255, 205, 68, .10);
+        box-shadow: 0 0 0 1px rgba(255, 205, 68, .55);
+    }
+
+    .wet .vals input {
+        width: 40px;
+        padding: 1px 3px;
+        border: 0;
+        border-radius: 2px;
+        background: transparent;
+        color: var(--amber);
+        font: inherit;
+        letter-spacing: inherit;
+        text-align: left;
+        outline: none;
+        -webkit-user-select: text;
+        user-select: text;
+        -webkit-appearance: none;
+        appearance: none;
+    }
+    .wet .vals input:last-child { text-align: right; }
+    .wet .vals input:focus {
+        background: rgba(255, 205, 68, .10);
+        box-shadow: 0 0 0 1px rgba(255, 205, 68, .55);
+    }
+
+    /* ---------------- 缩放三角（右下角） ---------------- */
+    .zoomer {
+        position: absolute;
+        right: 0; bottom: 0;
+        width: 30px; height: 30px;
+        padding: 0;
+        border: 0;
+        background: none;
+        cursor: ns-resize;
+        display: flex;
+        align-items: flex-end;
+        justify-content: flex-end;
+        z-index: 20;
+    }
+    .zoomer svg { display: block; width: 13px; height: 13px; margin: 0 4px 4px 0; }
+    .zoomer path { fill: rgba(255, 205, 68, .38); transition: fill .14s ease; }
+    .zoomer:hover path { fill: rgba(255, 205, 68, .92); }
+    /* 宿主是否接受窗口 resize：实心=接受，空心=拒绝 */
+    .zoomer[data-host="accepted"] path { fill: rgba(255, 205, 68, .62); }
+    .zoomer[data-host="rejected"] path {
+        fill: none;
+        stroke: rgba(255, 205, 68, .46);
+        stroke-width: 1.1;
+    }
+    .zoomer[data-host="rejected"]:hover path { stroke: rgba(255, 205, 68, .9); fill: none; }
+    .zoomer:active path { fill: var(--orange); }
+    .zoomer .zpct {
+        position: absolute;
+        right: 20px; bottom: 3px;
+        font-family: var(--mono);
+        font-size: 6px;
+        letter-spacing: .10em;
+        color: rgba(255, 205, 68, .60);
+        opacity: 0;
+        transition: opacity .14s ease;
+        pointer-events: none;
+        white-space: nowrap;
+    }
+    .zoomer:hover .zpct { opacity: 1; }
+    body.dragging-zoom .zoomer .zpct { opacity: 1; }
+
+    /* ---------------- 底栏 ---------------- */
+    footer {
+        flex: none;
+        margin-top: auto;
+        padding-top: 5px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-family: var(--mono);
+        text-transform: uppercase;
+    }
+    footer span {
+        font-size: 8px;
+        letter-spacing: .30em;
+        color: rgba(255, 205, 68, .30);
+    }
+    /* ===== 四声道电平表：左 FL/RL、右 FR/RR（左柱内、刻度外；右表镜像） ===== */
+    .mside { display: flex; flex-direction: column; justify-content: space-between; height: 182px; flex: none; }
+    .mside .metercol { position: static; }
+    .bar { height: 72px; }
+    .dbscale { height: 72px; }
+</style>
+</head>
+<body>
+
+<div class="canvas" id="canvas">
+
+<header>
+    <div class="mark">
+        <svg class="mark" viewBox="0 0 16 16" fill="none" aria-hidden="true" style="width:13px;height:13px;flex:none;display:block">
+  <ellipse cx="8" cy="8" rx="6.1" ry="3.9" stroke="#ff6b3d" stroke-width="1" transform="rotate(-30 8 8)"/>
+  <circle cx="12.4" cy="5.0" r="1.7" fill="#ff6b3d"/>
+</svg>
+        <span class="brand">ORBITA</span>
+    </div>
+    <span class="tag">Quad Doppler</span>
+</header>
+
+<section class="stage">
+    <div class="mside left">
+        <div class="metercol">
+            <span>FL</span>
+            <div class="meterbody">
+                <div class="bar"><i id="mtrFL"></i><b id="capFL"></b></div>
+                <div class="dbscale" id="scaleFL"></div>
+            </div>
+        </div>
+        <div class="metercol">
+            <span>RL</span>
+            <div class="meterbody">
+                <div class="bar"><i id="mtrRL"></i><b id="capRL"></b></div>
+                <div class="dbscale" id="scaleRL"></div>
+            </div>
+        </div>
+    </div>
+
+    <div class="orbit" id="orbit">
+        <svg viewBox="0 0 200 200" aria-hidden="true">
+            <defs>
+                <radialGradient id="plateGrad" cx="50%" cy="38%" r="62%">
+                    <stop offset="0%" stop-color="rgba(255,205,68,0.06)"/>
+                    <stop offset="72%" stop-color="rgba(255,205,68,0.012)"/>
+                    <stop offset="100%" stop-color="rgba(255,205,68,0)"/>
+                </radialGradient>
+                <clipPath id="padClip">
+                    <rect x="0" y="0" width="200" height="200"/>
+                </clipPath>
+            </defs>
+
+            <g clip-path="url(#padClip)">
+                <circle class="grid" cx="100" cy="100" r="25"/>
+                <circle class="grid" cx="100" cy="100" r="50"/>
+                <circle class="grid major" cx="100" cy="100" r="75"/>
+                <circle class="grid" cx="100" cy="100" r="100"/>
+                <line class="axis" x1="100" y1="0" x2="100" y2="200"/>
+                <line class="axis" x1="0" y1="100" x2="200" y2="100"/>
+            </g>
+
+            <!-- 实际轨道路径：半轴由 Radius / Shape 实时决定 -->
+            <ellipse class="path" id="orbitPath" cx="100" cy="100" rx="70" ry="70"
+                     clip-path="url(#padClip)"></ellipse>
+            <!-- Shape 到 0 / 1 时椭圆退化成线段。
+                 SVG 规范：rx 或 ry 为 0 时 <ellipse> 完全不渲染，必须换成 <line>，
+                 否则用户看到的是「轨迹消失」而不是一条直线。 -->
+            <line class="path" id="orbitLine" x1="4" y1="100" x2="196" y2="100"
+                  clip-path="url(#padClip)" style="display:none"></line>
+
+            <rect class="frame" x="0.5" y="0.5" width="199" height="199"/>
+            <circle class="center" cx="100" cy="100" r="1.4"/>
+        </svg>
+
+        <div class="ballwrap" id="ballWrap">
+            <div class="ball"></div>
+        </div>
+    </div>
+
+    <div class="mside right">
+        <div class="metercol">
+            <span>FR</span>
+            <div class="meterbody mirror">
+                <div class="bar"><i id="mtrFR"></i><b id="capFR"></b></div>
+                <div class="dbscale" id="scaleFR"></div>
+            </div>
+        </div>
+        <div class="metercol">
+            <span>RR</span>
+            <div class="meterbody mirror">
+                <div class="bar"><i id="mtrRR"></i><b id="capRR"></b></div>
+                <div class="dbscale" id="scaleRR"></div>
+            </div>
+        </div>
+    </div>
+</section>
+
+<section class="knobs r1">
+    <div class="knob" id="kSpeed">
+        <svg viewBox="0 0 54 54">
+            <circle class="plate" cx="27" cy="27" r="19"></circle>
+            <g id="tSpeed"></g>
+            <circle class="gauge" id="gSpeed" cx="27" cy="27" r="22" transform="rotate(135 27 27)"></circle>
+            <circle class="arc" id="aSpeed" cx="27" cy="27" r="22" transform="rotate(135 27 27)"></circle>
+            
+        </svg>
+        <input class="kval" id="vSpeed" type="text" inputmode="decimal" value="0.25" spellcheck="false" autocomplete="off">
+        <div class="klab">Speed</div>
+    </div>
+
+    <div class="knob" id="kRadius">
+        <svg viewBox="0 0 54 54">
+            <circle class="plate" cx="27" cy="27" r="19"></circle>
+            <g id="tRadius"></g>
+            <circle class="gauge" id="gRadius" cx="27" cy="27" r="22" transform="rotate(135 27 27)"></circle>
+            <circle class="arc" id="aRadius" cx="27" cy="27" r="22" transform="rotate(135 27 27)"></circle>
+            
+        </svg>
+        <input class="kval" id="vRadius" type="text" inputmode="decimal" value="0.353" spellcheck="false" autocomplete="off">
+        <div class="klab">Radius</div>
+    </div>
+
+    <div class="knob" id="kShape">
+        <svg viewBox="0 0 54 54">
+            <circle class="plate" cx="27" cy="27" r="19"></circle>
+            <g id="tShape"></g>
+            <circle class="gauge" id="gShape" cx="27" cy="27" r="22" transform="rotate(135 27 27)"></circle>
+            <circle class="arc" id="aShape" cx="27" cy="27" r="22" transform="rotate(135 27 27)"></circle>
+            
+        </svg>
+        <input class="kval" id="vShape" type="text" inputmode="decimal" value="0.50" spellcheck="false" autocomplete="off">
+        <div class="klab">Shape</div>
+    </div>
+
+    <div class="dirwrap">
+        <div class="dir" id="dir">
+            <span id="dirCCW">CCW</span>
+            <span id="dirCW" class="on">CW</span>
+        </div>
+        <div class="klab">Dir</div>
+    </div>
+</section>
+
+<section class="knobs r2">
+    <div class="knob" id="kRoom">
+        <svg viewBox="0 0 54 54">
+            <circle class="plate" cx="27" cy="27" r="19"></circle>
+            <g id="tRoom"></g>
+            <circle class="gauge" id="gRoom" cx="27" cy="27" r="22" transform="rotate(135 27 27)"></circle>
+            <circle class="arc" id="aRoom" cx="27" cy="27" r="22" transform="rotate(135 27 27)"></circle>
+            
+        </svg>
+        <input class="kval" id="vRoom" type="text" inputmode="decimal" value="50" spellcheck="false" autocomplete="off">
+        <div class="klab">Room</div>
+    </div>
+
+    <div class="knob" id="kDamp">
+        <svg viewBox="0 0 54 54">
+            <circle class="plate" cx="27" cy="27" r="19"></circle>
+            <g id="tDamp"></g>
+            <circle class="gauge" id="gDamp" cx="27" cy="27" r="22" transform="rotate(135 27 27)"></circle>
+            <circle class="arc" id="aDamp" cx="27" cy="27" r="22" transform="rotate(135 27 27)"></circle>
+            
+        </svg>
+        <input class="kval" id="vDamp" type="text" inputmode="decimal" value="16000" spellcheck="false" autocomplete="off">
+        <div class="klab">Damp</div>
+    </div>
+
+    <div class="knob" id="kGain">
+        <svg viewBox="0 0 54 54">
+            <circle class="plate" cx="27" cy="27" r="19"></circle>
+            <g id="tGain"></g>
+            <circle class="gauge" id="gGain" cx="27" cy="27" r="22" transform="rotate(135 27 27)"></circle>
+            <circle class="arc" id="aGain" cx="27" cy="27" r="22" transform="rotate(135 27 27)"></circle>
+        </svg>
+        <input class="kval" id="vGain" type="text" inputmode="decimal" value="2.00" spellcheck="false" autocomplete="off">
+        <div class="klab">Master Gain</div>
+    </div>
+</section>
+
+<section class="wet">
+    <div class="lab">Wet Send · Min / Max</div>
+    <div class="dual" id="dual">
+        <div class="ticks"></div>
+        <div class="track"></div>
+        <div class="range" id="wetRange"></div>
+        <div class="thumb" id="thumbMin"></div>
+        <div class="thumb" id="thumbMax"></div>
+    </div>
+    <div class="vals"><input class="wval" id="wetMinOut" type="text" inputmode="decimal" value="0.10" spellcheck="false" autocomplete="off"><input class="wval" id="wetMaxOut" type="text" inputmode="decimal" value="0.30" spellcheck="false" autocomplete="off"></div>
+</section>
+
+<footer><span>Cabbage 3</span></footer>
+
+</div><!-- /.canvas -->
+
+<button class="zoomer" id="zoomer" type="button" aria-label="拖动缩放界面，双击回到 100%" title="往右下拖变大、往左上拖变小 · 双击回到 100%">
+    <span class="zpct" id="zpct">125%</span>
+    <svg viewBox="0 0 10 10" aria-hidden="true"><path d="M10 2.6 L2.6 10 L10 10 Z"/></svg>
+</button>
+
+<script type="module">
+import { Cabbage } from './cabbage/cabbage.js';
+
+const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
+const $ = id => document.getElementById(id);
+
+/* 参数表：范围必须与 CSD 的 <Cabbage> 完全一致 */
+/* def 必须与 CSD 里该通道的 defaultValue 完全一致 —— 双击归位回到的就是它 */
+/* curve 是纯前端手感，不写进 CSD（宿主只认值）。
+   speed 0.1~20 是 200×（2.3 个数量级）→ k=5；常用 0.25~2 占 15%~54% 行程。
+   roomSize 10~100 一个数量级 → k=1；cutoff 1000~16000 → k=3。
+   radius / Shape 是有界比例量，低端没有额外精度需求 → 线性。 */
+const P = {
+    speed:    { min: 0.1, max: 20,    curve: 5, step: 0.001, def: 0.25,  fmt: fmtSpeed },
+    radius:   { min: 0,   max: 0.353, curve: 0, step: 0.001, def: 0.353, fmt: v => v.toFixed(3) },
+    Shape:    { min: 0,   max: 1,     curve: 0, step: 0.01,  def: 0.5,   fmt: v => v.toFixed(2) },
+    roomSize: { min: 10,  max: 100,   curve: 1, step: 0.1,   def: 50,    fmt: v => String(Math.round(v)) },
+    masterGain: { min: 0, max: 8,     curve: 0, step: 0.01,  def: 2,     fmt: v => v.toFixed(2) },
+    cutoff:   { min: 1000, max: 16000, curve: 3, step: 1,    def: 16000,  fmt: fmtHz }
+};
+
+/* 湿声上下限不属于旋钮表，单独给默认值 */
+const WET_DEF = { minWet: 0.1, maxWet: 0.3 };
+
+/* 必须与 CSD 中 widget 的书写顺序一致（只含 automatable:true 的通道） */
+const PARAM_IDX = ['speed', 'radius', 'Shape', 'dir', 'minWet', 'maxWet', 'roomSize', 'cutoff', 'masterGain'];
+
+let speed = 0.25, radius = 0.353, shape = 0.5;
+let room = 50, cut = 16000, gain = 2;
+let minWet = 0.1, maxWet = 0.3;
+let dirCW = true;
+
+let orbX = 0.5, orbY = 0.5;
+
+const dragOn = { speed: false, radius: false, Shape: false, roomSize: false, cutoff: false, masterGain: false, wet: null, zoom: false };
+
+function fmtSpeed(v) {
+    if (v < 1) return v.toFixed(3).replace(/0$/, '');
+    if (v < 10) return v.toFixed(2);
+    return v.toFixed(1);
+}
+/* 显示完整数字，不用 6k 这类缩写；频率单位在标签里体现（Damp / Damping） */
+function fmtHz(v) {
+    return String(Math.round(v));
+}
+
+/* ---------------- 轨道 ---------------- */
+const PAD = 200;
+const ORBIT_INSET = 4;          // 半轴与 pad 边框的余量（描边宽 1）
+
+/* 真实半轴（pad 单位，未缩放）。与 Csound 的 kX_raw / kY_raw 公式一致：
+     x = 0.5 + cos(θ) * radius*1.4142*Shape
+     y = 0.5 + sin(θ) * radius*1.4142*(1-Shape)
+   Radius 最大 0.5 时 kMaxRad = 0.7071，单侧半轴可达 141.4，远超 PAD/2 = 100。 */
+function orbitHalf() {
+    const kMaxRad = radius * 1.4142;
+    return {
+        rx: Math.max(0, kMaxRad * shape * PAD),
+        ry: Math.max(0, kMaxRad * (1 - shape) * PAD)
+    };
+}
+
+/* 整体等比缩小系数。
+   不能逐轴钳制 —— 那会破坏椭圆方程，长轴被削短、两端尖角被压平在边框上，
+   看起来就不是真椭圆。等比缩放才能保持形状真实。 */
+function orbitScale() {
+    const { rx, ry } = orbitHalf();
+    const limit = PAD / 2 - ORBIT_INSET;
+    const m = Math.max(rx, ry);
+    return m > limit ? limit / m : 1;
+}
+
+function placeBall() {
+    const b = $('ballWrap');
+    /* 球必须用与椭圆相同的系数，否则会脱离轨道：
+       (Δx·k)/(rx·k) = Δx/rx，比值不变 → 仍精确落在椭圆上。
+       先缩放再钳制：缩放后通常已落回 [0,1]，钳制只作最后兜底。 */
+    const k = orbitScale();
+    const x = 0.5 + (orbX - 0.5) * k;
+    const y = 0.5 + (orbY - 0.5) * k;
+    b.style.left = (clamp(x, 0, 1) * 100).toFixed(3) + '%';
+    b.style.top = ((1 - clamp(y, 0, 1)) * 100).toFixed(3) + '%';
+}
+
+/* 半轴小于这个值就认为已退化，改用 <line> 渲染 */
+const DEGEN = 1.5;
+
+function paintOrbit() {
+    const { rx, ry } = orbitHalf();
+    const k = orbitScale();
+    const srx = rx * k, sry = ry * k;
+    const el = $('orbitPath');
+    const ln = $('orbitLine');
+
+    if (srx < DEGEN || sry < DEGEN) {
+        /* 退化成线段：椭圆在这里完全不渲染，必须用 line 顶上 */
+        el.style.display = 'none';
+        if (sry < DEGEN && srx >= DEGEN) {
+            /* 水平线（Shape → 1） */
+            ln.setAttribute('x1', (100 - srx).toFixed(2));
+            ln.setAttribute('x2', (100 + srx).toFixed(2));
+            ln.setAttribute('y1', '100');
+            ln.setAttribute('y2', '100');
+            ln.style.display = '';
+        } else if (srx < DEGEN && sry >= DEGEN) {
+            /* 垂直线（Shape → 0） */
+            ln.setAttribute('x1', '100');
+            ln.setAttribute('x2', '100');
+            ln.setAttribute('y1', (100 - sry).toFixed(2));
+            ln.setAttribute('y2', (100 + sry).toFixed(2));
+            ln.style.display = '';
+        } else {
+            /* radius = 0：轨道收成一个点，没有可画的轨迹 */
+            ln.style.display = 'none';
+        }
+    } else {
+        ln.style.display = 'none';
+        el.style.display = '';
+        el.setAttribute('rx', srx.toFixed(2));
+        el.setAttribute('ry', sry.toFixed(2));
+    }
+
+    /* k 依赖 radius / shape，形状一变球的位置也要重算，否则会脱轨 */
+    placeBall();
+}
+
+/* ---------------- 旋钮 ---------------- */
+const KB = { r: 22, span: 0.75 };          // 半径、弧长占比（270°）
+const CIRC = 2 * Math.PI * KB.r;
+const SPAN = CIRC * KB.span;
+
+/* ---------------- 旋钮映射曲线（与 Singularity 同一套，见模板 §6.16）
+   归一化值 n ∈ [0,1] ↔ 旋钮行程 f ∈ [0,1]，一个数 curve 定整条曲线：
+     curve = 0    线性
+     curve = k>0  指数：低端展开（时间 / 频率这类跨数量级参数必须给）
+     curve = k<0  反向：高端展开
+   n = (e^(k·f) − 1) / (e^k − 1)      f = ln(1 + n·(e^k − 1)) / k
+   两式严格互逆，拖动 → 写值 → 回灌 → 重画不会漂。 */
+const CURVE_MAX_K = 12;                 // e^12 ≈ 1.6e5，防溢出
+const curveToNorm = (f, k) => {
+    if (!k) return f;
+    const K = Math.min(Math.abs(k), CURVE_MAX_K), A = Math.exp(K) - 1;
+    return k > 0 ? (Math.exp(K * f) - 1) / A
+                 : 1 - (Math.exp(K * (1 - f)) - 1) / A;
+};
+const normToCurve = (n, k) => {
+    if (!k) return n;
+    const K = Math.min(Math.abs(k), CURVE_MAX_K), A = Math.exp(K) - 1;
+    return k > 0 ? Math.log(1 + n * A) / K
+                 : 1 - Math.log(1 + (1 - n) * A) / K;
+};
+
+const toFrac   = (v, p) => normToCurve(clamp((v - p.min) / (p.max - p.min), 0, 1), p.curve || 0);
+const fromFrac = (f, p) => p.min + (p.max - p.min) * curveToNorm(clamp(f, 0, 1), p.curve || 0);
+
+function buildTicks(groupId) {
+    const g = $(groupId);
+    const NS = 'http://www.w3.org/2000/svg';
+    for (let i = 0; i <= 20; i++) {
+        const f = i / 20;
+        const deg = 225 + f * 270;
+        const rad = deg * Math.PI / 180;
+        const major = i % 5 === 0;
+        const r1 = major ? 24.6 : 25.2;
+        const r2 = 27.4;
+        const line = document.createElementNS(NS, 'line');
+        line.setAttribute('x1', (27 + r1 * Math.sin(rad)).toFixed(2));
+        line.setAttribute('y1', (27 - r1 * Math.cos(rad)).toFixed(2));
+        line.setAttribute('x2', (27 + r2 * Math.sin(rad)).toFixed(2));
+        line.setAttribute('y2', (27 - r2 * Math.cos(rad)).toFixed(2));
+        line.setAttribute('class', major ? 'tick major' : 'tick');
+        g.appendChild(line);
+    }
+}
+
+function knobValue(key) {
+    switch (key) {
+        case 'speed': return speed;
+        case 'radius': return radius;
+        case 'Shape': return shape;
+        case 'roomSize': return room;
+        case 'cutoff': return cut;
+        case 'masterGain': return gain;
+    }
+    return 0;
+}
+function setKnobValue(key, v) {
+    switch (key) {
+        case 'speed': speed = v; break;
+        case 'radius': radius = v; paintOrbit(); break;
+        case 'Shape': shape = v; paintOrbit(); break;
+        case 'roomSize': room = v; break;
+        case 'cutoff': cut = v; break;
+        case 'masterGain': gain = v; break;
+    }
+}
+
+const KNOB_IDS = {
+    speed:    { key: 'speed',    arc: 'aSpeed',  txt: 'vSpeed' },
+    radius:   { key: 'radius',   arc: 'aRadius', txt: 'vRadius' },
+    Shape:    { key: 'Shape',    arc: 'aShape',  txt: 'vShape' },
+    roomSize: { key: 'roomSize', arc: 'aRoom',   txt: 'vRoom' },
+    cutoff:   { key: 'cutoff',   arc: 'aDamp',   txt: 'vDamp' },
+    masterGain: { key: 'masterGain', arc: 'aGain', txt: 'vGain' }
+};
+
+function paintKnob(key) {
+    const p = P[key];
+    const v = knobValue(key);
+    const f = toFrac(clamp(v, p.min, p.max), p);
+    const ids = KNOB_IDS[key];
+    $(ids.arc).setAttribute('stroke-dasharray', (f * SPAN).toFixed(2) + ' ' + CIRC.toFixed(2));
+    /* 正在编辑这个旋钮时不要把用户正在敲的内容覆盖掉 */
+    if (editing.key === key) return;
+    $(ids.txt).value = p.fmt(v);
+}
+
+/* ---------------- 数值编辑 ----------------
+   三件事互不冲突：
+   · 拖动旋钮            → 连续改值
+   · 单击旋钮（未拖动）  → 进入编辑，数字全选，可直接敲
+   · 双击                 → 归位到默认值（P[key].def / WET_DEF）
+   双击自己计时，不用原生 dblclick —— 第一次单击会把焦点交给 input，
+   两次 click 的 target 不同，原生 dblclick 不可靠。 */
+const DBL_MS = 350;
+const editing = { key: null, el: null, knob: null };
+let lastTapAt = 0, lastTapKey = null;
+
+/* 解析用户输入：支持 6k / 6.5k / 0.25 / 50 这类写法 */
+function parseNum(raw, p) {
+    let t = String(raw).trim().toLowerCase().replace(/\s+/g, '');
+    if (!t) return NaN;
+    let mul = 1;
+    if (t.endsWith('k')) { mul = 1000; t = t.slice(0, -1); }
+    else if (t.endsWith('hz')) { t = t.slice(0, -2); }
+    const n = parseFloat(t);
+    if (!isFinite(n)) return NaN;
+    const v = n * mul;
+    return clamp(Math.round(v / p.step) * p.step, p.min, p.max);
+}
+
+function openEditor(key) {
+    const el = $(KNOB_IDS[key].txt);
+    if (editing.el === el) { el.select(); return; }
+    closeEditor(true);
+    editing.key = key;
+    editing.el = el;
+    editing.knob = el.closest('.knob');
+    if (editing.knob) editing.knob.classList.add('editing');
+    el.value = P[key].fmt(knobValue(key));
+    el.focus();
+    el.select();
+}
+
+function closeEditor(silent) {
+    const el = editing.el;
+    if (!el) return;
+    const wasKey = editing.key;
+    editing.key = null;
+    editing.el = null;
+    if (editing.knob) editing.knob.classList.remove('editing');
+    editing.knob = null;
+    if (!silent) {
+        el.blur();
+        if (wasKey) paintKnob(wasKey);
+    }
+}
+
+function commitEdit() {
+    const key = editing.key;
+    if (!key) return;
+    const el = editing.el;
+    const v = parseNum(el.value, P[key]);
+    closeEditor();
+    if (!isFinite(v)) { paintKnob(key); return; }     // 解析失败：还原显示
+    setKnobValue(key, v);
+    paintKnob(key);
+    Cabbage.sendControlData({ channel: key, value: v, gesture: 'complete' }, null);
+}
+
+function resetKnob(key) {
+    const d = P[key].def;
+    setKnobValue(key, d);
+    paintKnob(key);
+    Cabbage.sendControlData({ channel: key, value: d, gesture: 'complete' }, null);
+}
+
+function bindKnob(elId, key) {
+    const el = $(elId);
+    const p = P[key];
+    const txt = $(KNOB_IDS[key].txt);
+    let startY = 0, startX = 0, startF = 0, accF = 0, lastY = 0, dragging = false, active = false, onInput = false, moved = false;
+
+    el.addEventListener('pointerdown', e => {
+        if (e.button !== 0) return;
+        active = true;
+        dragging = false;
+        onInput = (e.target === txt);
+        startX = e.clientX;
+        moved = false;
+        startY = e.clientY;
+        startF = toFrac(clamp(knobValue(key), p.min, p.max), p);
+        accF = startF;
+        lastY = e.clientY;
+        if (!onInput) {
+            el.setPointerCapture(e.pointerId);
+            e.preventDefault();
+        }
+    });
+
+    el.addEventListener('pointermove', e => {
+        if (!active) return;
+        /* 编辑态：只记录有没有发生选词拖动，绝不旋钮拖动 */
+        if (onInput) {
+            if (Math.abs(e.clientX - startX) > 3 || Math.abs(e.clientY - startY) > 3) moved = true;
+            return;
+        }
+        const dy = startY - e.clientY;
+        if (!dragging) {
+            if (Math.abs(dy) < 3) return;                      // 死区：留给单击编辑
+            dragging = true;
+            dragOn[key] = true;
+            closeEditor(true);
+            Cabbage.sendControlData({ channel: key, value: knobValue(key), gesture: 'begin' }, null);
+        }
+        e.preventDefault();
+        /* Shift 精调：同样位移只走 1/5 行程。
+           ★ 必须按「每帧增量」累加，不能用 (起点 → 当前) 的总位移：
+             否则拖动中途按下/松开 Shift，分母突变，数值会瞬间跳一大截。 */
+        accF = clamp(accF + (lastY - e.clientY) / (e.shiftKey ? 750 : 150), 0, 1);
+        lastY = e.clientY;
+        let v = fromFrac(accF, p);
+        v = clamp(Math.round(v / p.step) * p.step, p.min, p.max);
+        setKnobValue(key, v);
+        paintKnob(key);
+        Cabbage.sendControlData({ channel: key, value: v, gesture: 'value' }, null);
+    });
+
+    const up = e => {
+        if (!active) return;
+        active = false;
+        const wasInput = onInput;
+        const wasMoved = moved;
+        onInput = false;
+        moved = false;
+        try { el.releasePointerCapture(e.pointerId); } catch (_) {}
+        if (dragging) {
+            dragging = false;
+            dragOn[key] = false;
+            Cabbage.sendControlData({ channel: key, value: knobValue(key), gesture: 'end' }, null);
+            return;
+        }
+        /* 在文本框里拖动 = 选词，不算点击，更不能触发归位 */
+        if (wasMoved) { lastTapAt = 0; lastTapKey = null; return; }
+
+        /* 未拖动 = 单击：判断是不是双击 */
+        const now = performance.now();
+        if (lastTapKey === key && now - lastTapAt < DBL_MS) {
+            lastTapAt = 0; lastTapKey = null;
+            closeEditor();
+            resetKnob(key);
+            return;
+        }
+        lastTapAt = now; lastTapKey = key;
+        if (!wasInput) openEditor(key);
+    };
+    el.addEventListener('pointerup', up);
+    el.addEventListener('pointercancel', up);
+    el.addEventListener('contextmenu', e => e.preventDefault());
+
+    txt.addEventListener('keydown', e => {
+        e.stopPropagation();
+        if (e.key === 'Enter') { e.preventDefault(); commitEdit(); }
+        else if (e.key === 'Escape') { e.preventDefault(); closeEditor(); paintKnob(key); }
+    });
+    txt.addEventListener('blur', () => { if (editing.key === key) commitEdit(); });
+    /* 不 stopPropagation：编辑态下第二击的 target 是 input，
+       若挡住冒泡，knob 收不到 pointerdown，双击归位永远不触发。
+       拖动由 pointermove 里的 onInput 守卫拦住。 */
+    /* 编辑框上的双击 = 归位 */
+    txt.addEventListener('dblclick', e => {
+        e.preventDefault(); e.stopPropagation();
+        closeEditor();
+        resetKnob(key);
+    });
+}
+
+/* ---------------- 方向 ---------------- */
+function paintDir() {
+    $('dirCCW').classList.toggle('on', !dirCW);
+    $('dirCW').classList.toggle('on', dirCW);
+}
+$('dir').addEventListener('click', () => {
+    dirCW = !dirCW;
+    paintDir();
+    Cabbage.sendControlData({ channel: 'dir', value: dirCW ? 1 : 0, gesture: 'complete' }, null);
+});
+
+/* ---------------- 混响发送 ---------------- */
+function paintWet() {
+    const w = $('dual').clientWidth;
+    const l = minWet * w, r = maxWet * w;
+    $('wetRange').style.left = l + 'px';
+    $('wetRange').style.width = Math.max(0, r - l) + 'px';
+    $('thumbMin').style.left = l + 'px';
+    $('thumbMax').style.left = r + 'px';
+    paintWetOut();
+}
+
+/* 正在编辑的那个不要被覆盖 */
+const wetEditing = { key: null };
+function paintWetOut() {
+    if (wetEditing.key !== 'minWet') $('wetMinOut').value = minWet.toFixed(2);
+    if (wetEditing.key !== 'maxWet') $('wetMaxOut').value = maxWet.toFixed(2);
+}
+
+/* 湿声上下限：直接点数字就能编辑（数字在拖动区之外，不冲突） */
+function bindWetField(id, key) {
+    const el = $(id);
+    const p = { min: 0, max: 1, step: 0.01 };
+
+    const commit = () => {
+        if (wetEditing.key !== key) return;
+        wetEditing.key = null;
+        const v = parseNum(el.value, p);
+        if (!isFinite(v)) { paintWetOut(); return; }
+        if (key === 'minWet') {
+            minWet = clamp(v, 0, Math.max(0, maxWet - 0.02));
+        } else {
+            maxWet = clamp(v, Math.min(1, minWet + 0.02), 1);
+        }
+        paintWet();
+        Cabbage.sendControlData({ channel: key, value: key === 'minWet' ? minWet : maxWet, gesture: 'complete' }, null);
+    };
+
+    el.addEventListener('focus', () => { wetEditing.key = key; el.select(); });
+    el.addEventListener('keydown', e => {
+        e.stopPropagation();
+        if (e.key === 'Enter') { e.preventDefault(); commit(); el.blur(); }
+        else if (e.key === 'Escape') { e.preventDefault(); wetEditing.key = null; paintWetOut(); el.blur(); }
+    });
+    el.addEventListener('blur', commit);
+    el.addEventListener('pointerdown', e => e.stopPropagation());
+    /* 双击 = 归位 */
+    el.addEventListener('dblclick', e => {
+        e.preventDefault();
+        wetEditing.key = null;
+        if (key === 'minWet') minWet = WET_DEF.minWet;
+        else maxWet = WET_DEF.maxWet;
+        paintWet();
+        el.blur();
+        Cabbage.sendControlData({ channel: key, value: key === 'minWet' ? minWet : maxWet, gesture: 'complete' }, null);
+    });
+}
+
+const wetFrom = e => {
+    const box = $('dual').getBoundingClientRect();
+    const f = clamp((e.clientX - box.left) / box.width, 0, 1);
+    if (dragOn.wet === 'min') minWet = Math.min(f, maxWet - 0.02);
+    else maxWet = Math.max(f, minWet + 0.02);
+    paintWet();
+    return dragOn.wet === 'min' ? minWet : maxWet;
+};
+
+function bindThumb(id, which) {
+    const el = $(id);
+    const ch = which === 'min' ? 'minWet' : 'maxWet';
+    el.addEventListener('pointerdown', e => {
+        dragOn.wet = which;
+        el.setPointerCapture(e.pointerId);
+        e.preventDefault();
+        Cabbage.sendControlData({ channel: ch, value: wetFrom(e), gesture: 'begin' }, null);
+    });
+    el.addEventListener('pointermove', e => {
+        if (dragOn.wet !== which) return;
+        e.preventDefault();
+        Cabbage.sendControlData({ channel: ch, value: wetFrom(e), gesture: 'value' }, null);
+    });
+    const up = () => {
+        if (dragOn.wet !== which) return;
+        dragOn.wet = null;
+        Cabbage.sendControlData({ channel: ch, value: which === 'min' ? minWet : maxWet, gesture: 'end' }, null);
+    };
+    el.addEventListener('pointerup', up);
+    el.addEventListener('pointercancel', up);
+}
+
+/* ---------------- 电平 ----------------
+   Csound 送来的是线性幅度（0dbfs=1 → 0..1），
+   表柱按 dB 显示：0 dB 在顶，-60 dB 在底（与 Stasis / Levy / Singularity 同一套）。 */
+const METER_H = 72;                       // 必须与 .bar / .dbscale 的 CSS 高度一致
+const DB_MIN = -60;
+/* 刻度往 0 dB 挤：等响感知下高端要密、低端要疏 */
+const DB_TICKS = [0, -6, -12, -18, -24, -30, -40, -50, -60];
+
+const ampToDb = a => 20 * Math.log10(Math.max(Math.abs(a), 1e-6));
+const dbToPos = db => clamp((db - DB_MIN) / (0 - DB_MIN), 0, 1);
+
+function buildDbScales() {
+    for (const id of ['scaleFL', 'scaleFR', 'scaleRL', 'scaleRR']) {
+        const el = $(id);
+        if (!el) continue;
+        el.innerHTML = '';
+        for (const db of DB_TICKS) {
+            const t = document.createElement('div');
+            t.className = 't' + (db === 0 ? ' zero' : '') + (db % 12 === 0 ? ' major' : '');
+            t.style.bottom = (dbToPos(db) * 100).toFixed(3) + '%';
+            const n = document.createElement('span');
+            n.className = 'n';
+            n.textContent = db === 0 ? '0' : String(db);
+            t.appendChild(n);
+            el.appendChild(t);
+        }
+    }
+}
+
+function setMeter(id, capId, amp) {
+    const db = clamp(ampToDb(amp), DB_MIN, 0);
+    const pos = dbToPos(db);
+    $(id).style.transform = 'scaleY(' + pos.toFixed(4) + ')';
+    const cap = $(capId);
+    cap.style.transform = 'translateY(' + (-pos * METER_H).toFixed(1) + 'px)';
+    cap.style.opacity = pos > 0.002 ? '.95' : '0';
+    return amp;
+}
+function updateGlow() {
+    const l = Math.max(lvlFL, lvlFR, lvlRL, lvlRR);
+    document.documentElement.style.setProperty('--lvl', clamp(l, 0, 1).toFixed(3));
+}
+
+/* ---------------- 接收后端 ---------------- */
+let lvlFL = 0, lvlFR = 0, lvlRL = 0, lvlRR = 0;
+
+function applyValue(id, v) {
+    if (typeof v !== 'number' || isNaN(v)) return;
+    switch (id) {
+        case 'orb_x':
+            /* 不能在这里钳到 [0,1]：Csound 推的是未钳制的 kX_raw（可达 1.19），
+               钳制会丢掉「超出 pad」的幅度，导致球被压在缩放后的椭圆内部。
+               只做宽范围兜底，显示时的钳制交给 placeBall。 */
+            orbX = clamp(v, -1, 2);
+            placeBall();
+            break;
+        case 'orb_y':
+            orbY = clamp(v, -1, 2);
+            placeBall();
+            break;
+        case 'speed':
+            if (dragOn.speed) break;
+            speed = clamp(v, P.speed.min, P.speed.max);
+            paintKnob('speed');
+            break;
+        case 'radius':
+            if (dragOn.radius) break;
+            radius = clamp(v, P.radius.min, P.radius.max);
+            paintKnob('radius');
+            paintOrbit();
+            break;
+        case 'Shape':
+            if (dragOn.Shape) break;
+            shape = clamp(v, P.Shape.min, P.Shape.max);
+            paintKnob('Shape');
+            paintOrbit();
+            break;
+        case 'dir':
+            dirCW = v >= 0.5;
+            paintDir();
+            break;
+        case 'minWet':
+            if (dragOn.wet === 'min') break;
+            minWet = clamp(v, 0, 1);
+            paintWet();
+            break;
+        case 'maxWet':
+            if (dragOn.wet === 'max') break;
+            maxWet = clamp(v, 0, 1);
+            paintWet();
+            break;
+        case 'roomSize':
+            if (dragOn.roomSize) break;
+            room = clamp(v, P.roomSize.min, P.roomSize.max);
+            paintKnob('roomSize');
+            break;
+        case 'masterGain':
+            if (dragOn.masterGain) break;
+            gain = clamp(v, 0, 8);
+            paintKnob('masterGain');
+            break;
+        case 'cutoff':
+            if (dragOn.cutoff) break;
+            cut = clamp(v, P.cutoff.min, P.cutoff.max);
+            paintKnob('cutoff');
+            break;
+        case 'outFL':
+            lvlFL = setMeter('mtrFL', 'capFL', v);
+            updateGlow();
+            break;
+        case 'outFR':
+            lvlFR = setMeter('mtrFR', 'capFR', v);
+            updateGlow();
+            break;
+        case 'outRL':
+            lvlRL = setMeter('mtrRL', 'capRL', v);
+            updateGlow();
+            break;
+        case 'outRR':
+            lvlRR = setMeter('mtrRR', 'capRR', v);
+            updateGlow();
+            break;
+    }
+}
+
+Cabbage.addMessageListener(msg => {
+    const data = msg.data ?? msg;
+    if (msg.command === 'widgetUpdate') {
+        const id = data.id ?? data.channel;
+        const v = data.value !== undefined ? data.value : Cabbage.extractValue(data, id);
+        applyValue(id, v);
+    } else if (msg.command === 'batchWidgetUpdate') {
+        for (const w of msg.widgets ?? []) {
+            const e = w.data ?? w;
+            applyValue(e.id, Cabbage.extractValue(e, e.id));
+        }
+    } else if (msg.command === 'resizeResponse') {
+        /* 仅在没有观察结论时参考；一旦观察到窗口真的变了，以观察为准 */
+        if (hostResize !== 'accepted') {
+            const d = msg.data ?? msg;
+            hostResize = d.accepted ? 'accepted' : 'rejected';
+            if (hostResize === 'accepted') { reqViewport = 0; clearTimeout(reqTimer); }
+            paintZoomBadge();
+        }
+    } else if (msg.command === 'parameterChange') {
+        const pm = msg.data ?? msg;
+        const id = typeof pm.channel === 'string' ? pm.channel : PARAM_IDX[pm.paramIdx];
+        if (id) applyValue(id, pm.value);
+    }
+});
+
+/* ---------------- 窗口缩放 ----------------
+   两条腿走路：
+   1. 向宿主请求改变插件窗口尺寸（Cabbage.requestResize → CLAP → AUv2 gui_request_resize）
+   2. 画布按「实际视口」自适应缩放，所以无论宿主接受与否，界面都填满可用区域
+   宿主可能拒绝 resize（AUv2 没有标准 resize 协议），那就只剩第 2 条腿。
+
+   为什么用 ResizeObserver 而不是 window.resize + 防抖：
+   RO 在「布局之后、绘制之前」触发，改完 scale 直接同一帧画出去，没有中间态；
+   而 resize 事件 + setTimeout 防抖会先画一帧旧尺寸（就是「窗口变大了内容没跟上」）。
+
+   交互：拖动右下角三角 —— 往下（往右下）拖变大，往上（往左上）拖变小，双击回 100%。
+   拖的是窗口右下角，所以方向必须服从「拉角」的直觉，而不是「往上推数值变大」的旋钮直觉。
+   下限 75%；上限不写死 —— 不同显示器能容纳的尺寸不同，由屏幕的宽和高共同决定（见 maxScale）。 */
+const CANVAS = { w: 320, h: 470 };
+const MIN_SCALE = 0.75;
+
+/* 上限必须同时满足两条：宽度装得下 + 高度装得下，取较小者。
+   高度这一条尤其关键 —— 窗口高过屏幕时，右下角的三角会被推到可视区外，
+   用户就再也点不到它，等于把插件「锁死」了。
+   再留 6% 余量（MAX_FILL），避免贴边后三角正好压在屏幕边缘难以点中。 */
+const MAX_FILL = 0.94;
+const screenW = () => (screen.availWidth || screen.width || 0);
+const screenH = () => (screen.availHeight || screen.height || 0);
+
+function maxScale() {
+    const sw = screenW(), sh = screenH();
+    const byW = sw ? sw / CANVAS.w : 3;
+    const byH = sh ? sh / CANVAS.h : 3;
+    /* 注意：这里不能给下限兜底，否则小屏上「兜底值」会反过来突破高度上限 */
+    return Math.max(MIN_SCALE, Math.min(12, Math.min(byW, byH) * MAX_FILL));
+}
+
+const clampScale = s => Math.min(maxScale(), Math.max(MIN_SCALE, s));
+const viewScale = () => Math.min(innerWidth / CANVAS.w, innerHeight / CANVAS.h);
+
+let hostResize = 'unknown';     // unknown | accepted | rejected
+let reqViewport = 0;            // 发请求时的视口快照（0 = 无待定请求）
+let reqTimer = 0;
+
+let zoomDrag = null;            // { anchorY, startScale, moved, target }
+let holdScale = null;           // 松手后等宿主追上的目标值（null = 无待定）
+
+/* 拖动基准必须用「屏幕绝对坐标」，不能用 clientY。
+   clientY 是相对窗口的：宿主 resize 时窗口会移动，指针在屏幕上没动，clientY 却变了，
+   这个变化又被反馈进缩放 → 正反馈，表现为「越往上拖反而越小」。
+   screenY 相对屏幕，窗口怎么移动都不影响。 */
+const yOf = e => (typeof e.screenY === 'number' && e.screenY !== 0) ? e.screenY : e.clientY;
+let pendingScale = null;        // 待发送的目标比例
+let rafId = 0;
+let lastSent = 0;               // 上次真正发出的比例
+let dragEndedAt = 0;
+
+/* override：拖动过程中直接显示目标值，其余时候显示实际视口推导值 */
+function paintZoomBadge(override) {
+    const s = override != null ? override : viewScale();
+    /* 拖动时也要立刻缩放：画布必须「领先」窗口。
+       否则顺序是「窗口先变大 → 画布后跟上」，中间露出宿主清屏的空白。 */
+    document.body.style.setProperty('--zoom', s.toFixed(4));
+    $('zpct').textContent = Math.round(s * 100) + '%';
+    $('zoomer').dataset.host = hostResize;
+}
+
+function fitToViewport() {
+    /* 宿主是否真的改了窗口，以「实际观察到的尺寸变化」为准。
+       resizeResponse 里的 accepted 标志不可靠：实测 Live 会真的放大窗口却回 accepted:false。 */
+    if (reqViewport && (innerWidth !== reqViewport.w || innerHeight !== reqViewport.h)) {
+        reqViewport = 0;
+        clearTimeout(reqTimer);
+        hostResize = 'accepted';
+    }
+    /* 宿主已经追上目标值（视口比例 ≈ 目标），hold 使命完成 */
+    if (holdScale != null && Math.abs(viewScale() - holdScale) < 0.01) holdScale = null;
+    /* 拖动中 / 等宿主追上时都保持目标值，否则会和 pointermove 打架、也会在松手瞬间弹回 */
+    paintZoomBadge(zoomDrag && zoomDrag.moved ? zoomDrag.target : (holdScale ?? undefined));
+}
+
+function requestWindowScale(scale) {
+    let w = Math.round(CANVAS.w * scale);
+    let h = Math.round(CANVAS.h * scale);
+    /* 二次钳制：即使 scale 从别处传进来（双击复位等），窗口也不许高过屏幕可用高度，
+       否则一拖过头就把三角和下方控件顶出屏幕，再也点不回来。等比例缩，保持画布不变形。 */
+    const limit = Math.floor(screenH() * MAX_FILL);
+    if (limit > 0 && h > limit) {
+        h = limit;
+        w = Math.round(h * CANVAS.w / CANVAS.h);
+    }
+    reqViewport = { w: innerWidth, h: innerHeight };
+    clearTimeout(reqTimer);
+    reqTimer = setTimeout(() => {
+        if (reqViewport) { reqViewport = 0; hostResize = 'rejected'; holdScale = null; paintZoomBadge(); }
+    }, 600);
+    Cabbage.requestResize(w, h, null);
+}
+
+/* 拖动时每帧最多发一次请求；变化小于 0.4% 不发，避免刷爆宿主 */
+function scheduleResizeRequest() {
+    if (rafId) return;
+    rafId = requestAnimationFrame(() => {
+        rafId = 0;
+        if (pendingScale == null) return;
+        if (lastSent && Math.abs(pendingScale - lastSent) < 0.004) return;
+        lastSent = pendingScale;
+        requestWindowScale(lastSent);
+    });
+}
+
+$('zoomer').addEventListener('pointerdown', e => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    $('zoomer').setPointerCapture(e.pointerId);
+    const s = viewScale();
+    /* 天花板不能低于当前实际比例，否则「往下拖想变大」的第一帧反而会缩一下
+       （窗口已经铺满屏幕时必然出现）。 */
+    zoomDrag = {
+        anchorY: yOf(e), startScale: s, moved: false, target: s,
+        ceiling: Math.max(s, maxScale())
+    };
+    dragOn.zoom = true;
+    document.body.classList.add('dragging-zoom');
+});
+
+$('zoomer').addEventListener('pointermove', e => {
+    if (!zoomDrag) return;
+    /* 拖的是窗口右下角，所以「往右下拖」= 拉出更大空间 = 变大。
+       这里只需要纵向分量，往下（anchorY 更小）为正。 */
+    const dy = yOf(e) - zoomDrag.anchorY;
+    /* 2px 死区：允许「原地双击」不被当成拖动 */
+    if (!zoomDrag.moved && Math.abs(dy) < 2) return;
+    zoomDrag.moved = true;
+    e.preventDefault();
+    /* 指数映射：往下拖放大，220px 位移约 2.7 倍，手感接近「对数旋钮」 */
+    const raw = zoomDrag.startScale * Math.exp(dy / 220);
+    const target = Math.min(zoomDrag.ceiling, Math.max(MIN_SCALE, raw));
+    zoomDrag.target = target;
+    pendingScale = target;
+    paintZoomBadge(target);
+    scheduleResizeRequest();
+});
+
+function endZoomDrag(e) {
+    if (!zoomDrag) return;
+    const moved = zoomDrag.moved;
+    const finalScale = zoomDrag.target;
+    zoomDrag = null;
+    pendingScale = null;
+    dragOn.zoom = false;
+    document.body.classList.remove('dragging-zoom');
+    if (rafId) { cancelAnimationFrame(rafId); rafId = 0; }
+    try { $('zoomer').releasePointerCapture(e.pointerId); } catch (_) {}
+    if (moved) {
+        dragEndedAt = performance.now();
+        /* 必须在这里把最终值补发出去：rAF 可能还没轮到，松手就丢了最后一档 */
+        if (Math.abs(finalScale - lastSent) >= 0.004) {
+            lastSent = finalScale;
+            requestWindowScale(finalScale);
+        }
+        /* 保持目标值等宿主到位；若宿主 600ms 内没改窗口，超时会清掉 hold 再回退 */
+        holdScale = finalScale;
+        paintZoomBadge(finalScale);
+        return;
+    }
+    paintZoomBadge();
+}
+$('zoomer').addEventListener('pointerup', endZoomDrag);
+$('zoomer').addEventListener('pointercancel', endZoomDrag);
+
+/* 双击回 100%。刚拖完的 400ms 内忽略，避免「拖完松手」被误判为双击 */
+$('zoomer').addEventListener('dblclick', e => {
+    e.preventDefault();
+    if (performance.now() - dragEndedAt < 400) return;
+    lastSent = 1;
+    holdScale = 1;
+    requestWindowScale(1);
+    paintZoomBadge(1);
+});
+
+function initZoom() {
+    paintZoomBadge();
+    lastSent = viewScale();
+    /* 主通道：RO 与窗口变化同帧生效 */
+    new ResizeObserver(fitToViewport).observe(document.documentElement);
+    /* 兜底：个别 WebKit 版本 RO 不覆盖视口变化 */
+    addEventListener('resize', fitToViewport);
+    /* 启动不主动请求：窗口尺寸由 CSD 的 form.size 决定，用户拖动三角才请求改变 */
+}
+
+initZoom();
+
+/* ---------------- 启动 ---------------- */
+buildTicks('tSpeed');
+buildTicks('tRadius');
+buildTicks('tShape');
+buildTicks('tRoom');
+buildTicks('tDamp');
+buildTicks('tGain');
+
+for (const g of ['gSpeed', 'gRadius', 'gShape', 'gRoom', 'gDamp', 'gGain']) {
+    $(g).setAttribute('stroke-dasharray', SPAN.toFixed(2) + ' ' + CIRC.toFixed(2));
+}
+
+bindKnob('kSpeed', 'speed');
+bindKnob('kRadius', 'radius');
+bindKnob('kShape', 'Shape');
+bindKnob('kRoom', 'roomSize');
+bindKnob('kDamp', 'cutoff');
+bindKnob('kGain', 'masterGain');
+
+bindThumb('thumbMin', 'min');
+bindThumb('thumbMax', 'max');
+bindWetField('wetMinOut', 'minWet');
+bindWetField('wetMaxOut', 'maxWet');
+
+placeBall();
+paintOrbit();
+paintDir();
+paintWet();
+paintKnob('masterGain');
+paintKnob('speed');
+paintKnob('radius');
+paintKnob('Shape');
+paintKnob('roomSize');
+paintKnob('cutoff');
+
+buildDbScales();
+setMeter('mtrFL', 'capFL', 0);
+setMeter('mtrFR', 'capFR', 0);
+setMeter('mtrRL', 'capRL', 0);
+setMeter('mtrRR', 'capRR', 0);
+
+/* 拖动期间禁止原生选中/拖影，避免指针滑过其他元素时被抢走 */
+for (const ev of ['selectstart', 'dragstart']) {
+    document.addEventListener(ev, e => {
+        /* 输入框里必须允许选中文本，否则没法改数值 */
+        if (e.target && e.target.closest && e.target.closest('input')) return;
+        if (Object.values(dragOn).some(Boolean)) e.preventDefault();
+    });
+}
+
+Cabbage.sendCustomCommand('cabbageIsReadyToLoad', null);
+/* ---------------- 内置使用手册 ----------------
+   顶栏 ? 在 iframe 里打开 help.html。只用内嵌：WebView 里 window.open 是死按钮。 */
+import('./help-ui.js').then(({ attachHelp }) => attachHelp())
+    .catch(e => console.warn('Cabbage: 手册模块不可用 —', e));
+</script>
+</body>
+</html>

@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Cab3-HRTF-Orbita · 使用手册</title>
+<style>:root {
+    --fg: #f3f3f3;
+    --dim: rgba(255, 255, 255, .70);
+    --faint: rgba(255, 255, 255, .42);
+    --hair: rgba(255, 255, 255, .12);
+    --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body {
+    background: #000;
+    color: var(--fg);
+    font-family: -apple-system, "Helvetica Neue", "PingFang SC", Arial, sans-serif;
+    font-size: 11px;
+    line-height: 1.68;
+    -webkit-font-smoothing: antialiased;
+}
+body { padding: 16px 14px 38px; max-width: 760px; margin: 0 auto; }
+::-webkit-scrollbar { width: 4px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, .16); border-radius: 2px; }
+::-webkit-scrollbar-thumb:hover { background: rgba(255, 255, 255, .32); }
+
+h1 {
+    font-size: 13px;
+    font-weight: 500;
+    letter-spacing: .26em;
+    text-transform: uppercase;
+}
+.sub {
+    margin-top: 4px;
+    font-family: var(--mono);
+    font-size: 8.5px;
+    letter-spacing: .16em;
+    text-transform: uppercase;
+    color: var(--faint);
+}
+h2 {
+    margin: 20px 0 6px;
+    font-size: 9px;
+    font-weight: 500;
+    letter-spacing: .22em;
+    text-transform: uppercase;
+    color: rgba(255, 255, 255, .55);
+    padding-bottom: 4px;
+    border-bottom: 1px solid var(--hair);
+}
+h3 {
+    margin: 13px 0 2px;
+    font-family: var(--mono);
+    font-size: 8.5px;
+    font-weight: 500;
+    letter-spacing: .16em;
+    text-transform: uppercase;
+    color: rgba(255, 255, 255, .38);
+}
+h3:first-of-type { margin-top: 6px; }
+
+ul { padding-left: 15px; }
+li { color: var(--dim); margin: 1px 0; }
+li b { color: #fff; font-weight: 500; }
+
+table { width: 100%; border-collapse: collapse; }
+td {
+    padding: 3px 0;
+    vertical-align: top;
+    color: var(--dim);
+    font-size: 10.5px;
+}
+td:first-child {
+    width: 96px;
+    padding-right: 10px;
+    font-family: var(--mono);
+    font-size: 8.5px;
+    letter-spacing: .04em;
+    color: rgba(255, 255, 255, .88);
+    white-space: nowrap;
+}
+
+.k { padding: 7px 0 8px; border-bottom: 1px solid rgba(255, 255, 255, .065); }
+.k:last-child { border-bottom: 0; }
+.k .head { display: flex; align-items: baseline; gap: 8px; }
+.k .name { font-size: 10.5px; font-weight: 600; letter-spacing: .01em; }
+.k .ch {
+    font-family: var(--mono);
+    font-size: 8.5px;
+    letter-spacing: .02em;
+    color: rgba(255, 255, 255, .34);
+}
+.k .range {
+    margin-left: auto;
+    font-family: var(--mono);
+    font-size: 8.5px;
+    letter-spacing: .02em;
+    color: rgba(255, 255, 255, .44);
+    text-align: right;
+    white-space: nowrap;
+}
+.k .desc { margin-top: 2px; color: var(--dim); font-size: 10.5px; line-height: 1.62; }
+.k .desc code {
+    font-family: var(--mono);
+    font-size: 9.5px;
+    color: rgba(255, 255, 255, .90);
+}
+
+.note {
+    margin-top: 8px;
+    padding: 8px 10px;
+    border-left: 2px solid rgba(255, 255, 255, .20);
+    background: rgba(255, 255, 255, .035);
+    color: rgba(255, 255, 255, .68);
+    font-size: 10px;
+    line-height: 1.66;
+}
+.note b { color: #fff; font-weight: 600; }</style>
+</head>
+<body>
+<h1>ORBITA</h1>
+<div class="sub">HRTF Binaural · Cab3-HRTF-Orbita</div>
+
+<h2>快速上手</h2>
+<table>
+<tr><td>无需摆位</td><td>位置由插件自己走（轨迹是算法生成的），没有可拖拽的点；你调的是「它怎么走」。</td></tr>
+<tr><td>数值框</td><td>点击进入编辑，<code>Enter</code> 提交、<code>Esc</code> 取消。双击数值框回默认值。</td></tr>
+<tr><td>旋钮 / 推子</td><td>旋钮上下拖；横向推子左右拖、纵向推子上下拖。按住 <code>Shift</code> 精调。双击回默认值。</td></tr>
+<tr><td>Wet Send</td><td>两个滑柄分别拖混响发送的下限 / 上限，不能交叉。</td></tr>
+<tr><td>右下角三角</td><td>拖动改窗口大小，双击回到 100%。</td></tr>
+<tr><td>顶栏 ?</td><td>打开本手册。</td></tr>
+</table>
+
+<h2>旋钮与推子</h2>
+<h3>Orbit</h3>
+<div class="k"><div class="head"><span class="name">Speed</span><span class="ch">speed</span><span class="range">0.1 – 20 · 默认 0.25</span></div><div class="desc">沿轨道跑一圈的速度（Hz）。越低越缓。</div></div>
+<div class="k"><div class="head"><span class="name">Radius</span><span class="ch">radius</span><span class="range">0 – 0.353 · 默认 0.353</span></div><div class="desc">轨道半径（归一化）。<code>0</code> = 停在中心不动；<code>0.353</code>（= 0.5 / √2）时无论 Shape 取什么值，最远点都正好落在圆盘边上 —— 上限就定在这里，再大就会跑出圆盘。</div></div>
+<div class="k"><div class="head"><span class="name">Shape</span><span class="ch">shape</span><span class="range">0 – 1 · 默认 0.500</span></div><div class="desc">圆 ↔ 线的渐变。X 半轴 = <code>R·√2·Shape</code>，Y 半轴 = <code>R·√2·(1−Shape)</code>，两者互补，所以 <code>0.5</code> = 正圆；<code>0</code> 退化成<b>竖直</b>线段（只有 Y 摆动），<code>1</code> 退化成<b>水平</b>线段（只有 X 摆动）。任意取值下两半轴之和恒为 <code>R·√2</code>，最远点因此永远不超过圆盘边。</div></div>
+<div class="k"><div class="head"><span class="name">Dir</span><span class="ch">dir</span><span class="range">CCW / CW · 默认 CW</span></div><div class="desc">环绕方向：CCW 逆时针、CW 顺时针。</div></div>
+<h3>Room</h3>
+<div class="k"><div class="head"><span class="name">Room</span><span class="ch">roomSize</span><span class="range">10 – 100 · 默认 50</span></div><div class="desc">空间尺寸。延迟基准 = <code>0.1 ms + 距离 × Room</code>，混响反馈 = <code>0.10 + (Room−10)/90 × 0.80</code>（10 → 0.10，100 → 0.90）。越大越空旷、尾巴越长。</div></div>
+<div class="k"><div class="head"><span class="name">Damp</span><span class="ch">cutoff</span><span class="range">1000 – 16000 · 默认 16000</span></div><div class="desc">混响的高频吸收。越低尾巴越暗。</div></div>
+<div class="k"><div class="head"><span class="name">Master Gain</span><span class="ch">masterGain</span><span class="range">0 – 8 · 默认 2.00</span></div><div class="desc">总输出增益。</div></div>
+<div class="k"><div class="head"><span class="name">Wet Send Min / Max</span><span class="ch">minWet / maxWet</span><span class="range">0 – 1 · 默认 0.10 / 0.30</span></div><div class="desc">最近处 / 最远处的混响发送量，中间按深度线性插值。<b>发送量还会再乘一次距离衰减</b>，所以远端混响跟着干声一起变小，不会越远越糊。</div></div>
+
+
+<div class="note"><b>HRTF 渲染：</b>输出左右两路双耳信号。声场是以 pad 中心为圆心的圆盘，圆盘外不可达。<b>注意穿心：</b>声源经过盘心时，方位角会在一帧内翻转 180°（等效 135,000 °/s），hrtfmove2 的 STFT 重合成跟不上，实测会产生 <b>6.5–7.2 dB</b> 的瞬态伪影（静止基线仅 0.36 dB），听感上是音量与音色的一次突变。编曲时尽量让轨迹绕开中心。</div>
+
+<div class="note"><b>音量与混响的安全余量：</b>本插件的信号链内部留了 6 dB 余量（干声与混响发送各减半），末端还有一道软膝限幅（0.85 以下完全线性）。但把 <b>Master Gain</b> 推到很高、同时把 <b>Wet Send Max</b> 也拉满时，仍可能顶到限幅器的压缩区 —— 听感上是轻微的「滋滋」或发毛。遇到这种情况，先把 Master 退回 4–6，再用 Wet Send 补混响量，不要两边同时拉满。</div>
+</body>
+</html>

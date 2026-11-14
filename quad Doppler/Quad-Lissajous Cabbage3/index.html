@@ -1,0 +1,1906 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Cab3-Quad-Lissajous</title>
+<style>
+    :root {
+        --bg: #04030a;
+        --bg2: #08041a;
+        --uv: #a678ff;
+        --uv-soft: rgba(166, 120, 255, .30);
+        --uv-dim: rgba(166, 120, 255, .58);
+        --uv-lab: rgba(198, 172, 255, .95);   /* 分组标题：小字号下要可读 */
+        --ice: #7ee8ff;
+        --ice-dim: rgba(126, 232, 255, .34);
+        --ice-faint: rgba(126, 232, 255, .10);
+        --fg: #ece9f7;
+        --dim: rgba(236, 233, 247, .46);
+        --faint: rgba(236, 233, 247, .18);
+        --mono: "SF Mono", ui-monospace, "JetBrains Mono", Menlo, Consolas, monospace;
+        --lvl: 0;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    html, body {
+        width: 100%;
+        height: 100%;
+        overflow: hidden;
+        background: var(--bg);
+    }
+
+    body {
+        --zoom: 1;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        position: relative;
+    }
+
+    .canvas {
+        width: 380px;
+        height: 684px;
+        flex: none;
+        padding: 13px 16px 10px;
+        transform: scale(var(--zoom));
+        transform-origin: center center;
+        display: flex;
+        flex-direction: column;
+        color: var(--fg);
+        font-family: -apple-system, "Helvetica Neue", "PingFang SC", Arial, sans-serif;
+        font-size: 10px;
+        user-select: none;
+        -webkit-user-select: none;
+        -webkit-touch-callout: none;
+        overflow: hidden;
+        position: relative;
+        background:
+            radial-gradient(ellipse 90% 58% at 50% 28%, #120726 0%, #08041a 46%, var(--bg) 100%);
+    }
+
+    /* 顶部冷光：示波器玻璃的辉光 */
+    .canvas::before {
+        content: "";
+        position: absolute;
+        left: 0; right: 0; top: 0;
+        height: 44%;
+        pointer-events: none;
+        z-index: 0;
+        background: radial-gradient(ellipse 72% 100% at 50% 0%,
+            rgba(166, 120, 255, .11) 0%, transparent 72%);
+        opacity: calc(.55 + var(--lvl) * .45);
+        will-change: opacity;
+    }
+    /* 底部压暗 */
+    .canvas::after {
+        content: "";
+        position: absolute;
+        inset: 0;
+        pointer-events: none;
+        z-index: 0;
+        background: linear-gradient(to bottom, transparent 50%, rgba(2, 1, 6, .76) 100%);
+    }
+    .canvas > * { position: relative; z-index: 1; }
+
+    body.dragging,
+    body.dragging * {
+        user-select: none !important;
+        -webkit-user-select: none !important;
+    }
+    body.dragging input { pointer-events: none !important; cursor: default !important; }
+    body.dragging ::selection { background: transparent; }
+
+    /* ---------------- 顶栏 ---------------- */
+    header {
+        flex: none;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding-bottom: 7px;
+        border-bottom: 1px solid rgba(166, 120, 255, .18);
+    }
+    .mark { display: flex; align-items: center; gap: 7px; }
+    .mark svg { display: block; width: 12px; height: 12px; }
+    .mark .ring { fill: none; stroke: var(--uv); stroke-width: 1.1; }
+    .brand {
+        font-size: 12px;
+        font-weight: 600;
+        letter-spacing: .32em;
+        color: var(--fg);
+    }
+    .tag {
+        font-family: var(--mono);
+        font-size: 6.5px;
+        letter-spacing: .30em;
+        text-transform: uppercase;
+        color: var(--uv-dim);
+    }
+
+    /* ---------------- 示波区 ---------------- */
+    .stage {
+        flex: none;
+        margin-top: 6px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 12px;
+    }
+
+    /* ===== 电平表：表柱 + dB 标尺（与全系列同一套，见模板 §6.15） =====
+       电平按 dB 映射：0 dB 在顶、-60 dB 在底。L 表柱在内、刻度在外；R 表镜像。 */
+    .metercol { display: flex; flex-direction: column; align-items: center; gap: 4px; }
+    .metercol > span {
+        height: 8px;
+        font-family: var(--mono);
+        font-size: 6px;
+        line-height: 8px;
+        letter-spacing: .18em;
+        color: var(--uv-dim);
+    }
+
+    .meterbody { display: flex; align-items: stretch; gap: 3px; }
+    .meterbody.mirror { flex-direction: row-reverse; }
+
+    .bar { position: relative; width: 10px; height: 150px; flex: none; }
+    .bar::before, .bar::after {
+        content: "";
+        position: absolute;
+        top: 0; bottom: 0;
+        width: 1px;
+        background: rgba(166, 120, 255, .24);
+    }
+    .bar::before { left: 0; }
+    .bar::after { right: 0; }
+    .bar i {
+        position: absolute;
+        left: 1px; right: 1px; bottom: 0;
+        height: 100%;
+        transform-origin: bottom center;
+        transform: scaleY(0);
+        background: linear-gradient(to top,
+            var(--uv) 0%,
+            rgba(140, 120, 255, .74) 46%,
+            rgba(126, 232, 255, .62) 100%);
+        transition: transform .05s linear;
+        will-change: transform;
+    }
+    /* 峰值亮帽 */
+    .bar b {
+        position: absolute;
+        left: 0; right: 0;
+        height: 1px;
+        bottom: 0;
+        background: #d9f6ff;
+        transform: translateY(0);
+        transition: transform .05s linear, opacity .12s linear;
+        opacity: 0;
+        will-change: transform;
+    }
+
+    /* dB 标尺 */
+    .dbscale { position: relative; width: 26px; height: 150px; flex: none; }
+    .dbscale .t { position: absolute; left: 0; right: 0; height: 0; }
+    .dbscale .t::before {
+        content: "";
+        position: absolute;
+        left: 0; top: 0;
+        width: 3px; height: 1px;
+        background: rgba(166, 120, 255, .34);
+    }
+    .dbscale .t.major::before { width: 5px; background: rgba(166, 140, 255, .58); }
+    .dbscale .t .n {
+        position: absolute;
+        right: 0; top: -3.6px;
+        font-family: var(--mono);
+        font-size: 6.5px; line-height: 1;
+        letter-spacing: .01em;
+        color: rgba(180, 160, 255, .46);
+    }
+    .dbscale .t.major .n { color: rgba(200, 185, 255, .70); }
+    .dbscale .t.zero .n { color: rgba(230, 245, 255, .90); }
+
+    /* 右表镜像：刻度贴外侧，数字靠内 */
+    .meterbody.mirror .dbscale .t::before { left: auto; right: 0; }
+    .meterbody.mirror .dbscale .t .n { right: auto; left: 0; }
+
+    /* ---------------- 李萨如示波器 ---------------- */
+    .scopecol { display: flex; flex-direction: column; align-items: center; }
+    .scope {
+        width: 200px;
+        height: 200px;
+        position: relative;
+        flex: none;
+    }
+    .scope > svg { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+
+    .scope .grid { stroke: var(--ice); stroke-width: 1; opacity: .07; }
+    .scope .grid.major { opacity: .16; stroke-dasharray: 1 4; }
+    .scope .frame { fill: none; stroke: var(--uv); stroke-width: 1; opacity: .22; }
+    .scope .bracket { fill: none; stroke: var(--uv); stroke-width: 1.4; opacity: .72; }
+
+    /* 导引曲线：解析正弦生成的理想图形（与 DSP 同构） */
+    .scope .guide {
+        fill: none;
+        stroke: var(--ice);
+        stroke-width: .8;
+        stroke-linejoin: round;
+        opacity: .26;
+    }
+
+    /* 余晖轨迹（合成轴） */
+    .scope .trail { fill: none; stroke: var(--uv); stroke-width: 1; stroke-linecap: round; }
+
+    /* 荧光层：canvas 自绘，透明度由 destination-out 逐帧衰减 */
+    #phosphor {
+        position: absolute;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+        pointer-events: none;
+    }
+
+    .scope .cross line { stroke: var(--ice); stroke-width: .8; opacity: .17; stroke-dasharray: 1 4; }
+
+    .scope .beam .halo { fill: url(#beamGlow); }
+    .scope .beam .core {
+        fill: #fff;
+        filter: drop-shadow(0 0 3px rgba(198, 172, 255, .95));
+    }
+
+    .fread {
+        margin-top: 3px;
+        height: 9px;
+        font-family: var(--mono);
+        font-size: 7px;
+        line-height: 9px;
+        letter-spacing: .14em;
+        color: var(--ice-dim);
+        white-space: nowrap;
+    }
+
+    /* ---------------- 源选择（分段按钮） ---------------- */
+    .src { flex: none; margin-top: 6px; display: flex; flex-direction: column; gap: 4px; }
+    .srow { display: flex; align-items: center; gap: 7px; height: 17px; }
+    .stag {
+        width: 30px;
+        flex: none;
+        font-family: var(--mono);
+        font-size: 7.5px;
+        letter-spacing: .12em;
+        text-transform: uppercase;
+        color: var(--uv-dim);
+    }
+    .seg {
+        display: flex;
+        flex: 1;
+        height: 17px;
+        border: 1px solid rgba(166, 120, 255, .22);
+        border-radius: 2px;
+        overflow: hidden;
+    }
+    .seg button {
+        flex: 1;
+        padding: 0;
+        border: 0;
+        background: transparent;
+        color: rgba(236, 233, 247, .40);
+        font-family: var(--mono);
+        font-size: 7.5px;
+        letter-spacing: .10em;
+        cursor: pointer;
+        touch-action: manipulation;
+        transition: background .12s ease, color .12s ease, box-shadow .12s ease;
+    }
+    .seg button + button { border-left: 1px solid rgba(166, 120, 255, .14); }
+    .seg button:hover { color: #fff; }
+    .seg button.on {
+        background: rgba(166, 120, 255, .22);
+        color: #fff;
+        box-shadow: inset 0 -1px 0 rgba(166, 120, 255, .85);
+    }
+    .seg button:focus-visible { outline: 1px solid var(--uv); outline-offset: -2px; }
+    /* Wave 只影响合成轴：两个轴都被输入驱动时压暗，避免误以为它还在起作用 */
+    .seg.off { opacity: .38; }
+    .seg.off button { cursor: default; }
+
+    /* ---------------- 分组标签 ---------------- */
+    .glab {
+        flex: none;
+        margin-top: 4px;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        font-family: var(--mono);
+        font-size: 8.5px;
+        line-height: 10px;
+        letter-spacing: .26em;
+        text-transform: uppercase;
+        color: var(--uv-lab);
+    }
+    .glab::after {
+        content: "";
+        flex: 1;
+        height: 1px;
+        background: linear-gradient(to right, rgba(166, 120, 255, .30), transparent);
+    }
+
+    /* ---------------- 旋钮 ---------------- */
+    .knobs {
+        flex: none;
+        display: flex;
+        justify-content: center;
+    }
+    .knobs.r1 { margin-top: 5px; gap: 10px; }
+    .knobs.r2 { margin-top: 3px; gap: 40px; }
+    .knobs.r3 { margin-top: 2px; gap: 26px; }
+
+    .knob {
+        width: 66px;
+        text-align: center;
+        cursor: ns-resize;
+        touch-action: none;
+        position: relative;
+    }
+    .knob svg { display: block; width: 56px; height: 56px; margin: 0 auto; overflow: visible; }
+    .knob .plate { fill: rgba(24, 14, 46, .62); stroke: rgba(166, 120, 255, .18); stroke-width: 1; }
+    .knob .gauge { fill: none; stroke: rgba(166, 120, 255, .13); stroke-width: 1.6; }
+    .knob .arc {
+        fill: none;
+        stroke: var(--uv);
+        stroke-width: 1.7;
+        stroke-linecap: round;
+        filter: drop-shadow(0 0 3px rgba(166, 120, 255, .55));
+        transition: stroke-dasharray .05s linear;
+    }
+    .knob .tick { stroke: rgba(126, 232, 255, .22); stroke-width: 1; }
+    .knob .tick.major { stroke: rgba(126, 232, 255, .48); }
+
+    /* 数值输入框：平时不接管指针（整块旋钮都能拖），单击旋钮才进入编辑 */
+    .kval {
+        position: absolute;
+        left: 50%;
+        top: 28px;
+        transform: translate(-50%, -50%);
+        width: 54px;
+        height: 16px;
+        padding: 0;
+        border: 0;
+        border-radius: 2px;
+        background: transparent;
+        color: var(--fg);
+        font-family: var(--mono);
+        font-size: 10.5px;
+        font-weight: 300;
+        letter-spacing: .01em;
+        text-align: center;
+        outline: none;
+        pointer-events: none;
+        -webkit-user-select: text;
+        user-select: text;
+        -webkit-appearance: none;
+        appearance: none;
+    }
+    .knob.editing { cursor: text; }
+    .knob.editing .kval {
+        pointer-events: auto;
+        background: rgba(166, 120, 255, .14);
+        box-shadow: 0 0 0 1px rgba(166, 120, 255, .62);
+    }
+
+    .klab {
+        margin-top: 3px;
+        font-family: var(--mono);
+        font-size: 8px;
+        line-height: 10px;
+        letter-spacing: .16em;
+        text-transform: uppercase;
+        color: #fff;
+        white-space: nowrap;
+    }
+
+/* ---------------- 混响发送 ---------------- */
+    .wet { flex: none; width: 240px; margin: 7px auto 0; }
+    .wet .ls {
+        font-family: var(--mono);
+        font-size: 8px;
+        letter-spacing: .18em;
+        text-transform: uppercase;
+        color: #fff;
+        margin-bottom: 6px;
+        text-align: center;
+    }
+    .dual { position: relative; width: 100%; height: 16px; }
+    .dual .ticks {
+        position: absolute;
+        left: 0; right: 0; top: 50%;
+        height: 5px;
+        margin-top: -2.5px;
+        background: repeating-linear-gradient(90deg,
+            rgba(126, 232, 255, .18) 0 1px, transparent 1px 10%);
+        pointer-events: none;
+    }
+    .dual .track {
+        position: absolute;
+        left: 0; right: 0; top: 50%;
+        height: 1px; margin-top: -0.5px;
+        background: rgba(166, 120, 255, .22);
+    }
+    .dual .range {
+        position: absolute;
+        top: 50%;
+        height: 1px;
+        margin-top: -0.5px;
+        background: var(--uv);
+        box-shadow: 0 0 7px rgba(166, 120, 255, .55);
+    }
+    .dual .thumb {
+        position: absolute;
+        top: 50%;
+        width: 8px; height: 8px;
+        margin-top: -4px;
+        margin-left: -4px;
+        border-radius: 50%;
+        background: #08040f;
+        border: 1px solid var(--uv-dim);
+        cursor: ew-resize;
+        touch-action: none;
+        transition: border-color .14s ease, box-shadow .14s ease, transform .1s ease;
+    }
+    .dual .thumb:hover {
+        border-color: var(--uv);
+        box-shadow: 0 0 0 3px rgba(166, 120, 255, .12), 0 0 9px rgba(166, 120, 255, .45);
+    }
+    .dual .thumb:active { transform: scale(1.14); }
+    .wet .vals {
+        display: flex;
+        justify-content: space-between;
+        margin-top: 5px;
+        font-family: var(--mono);
+        font-size: 8px;
+        font-weight: 300;
+        letter-spacing: .06em;
+        color: var(--fg);
+    }
+    .wet .vals input {
+        width: 46px;
+        padding: 1px 3px;
+        border: 0;
+        border-radius: 2px;
+        background: transparent;
+        color: var(--fg);
+        font: inherit;
+        letter-spacing: inherit;
+        text-align: left;
+        outline: none;
+        -webkit-user-select: text;
+        user-select: text;
+        -webkit-appearance: none;
+        appearance: none;
+    }
+    .wet .vals input:last-child { text-align: right; }
+    .wet .vals input:focus {
+        background: rgba(166, 120, 255, .14);
+        box-shadow: 0 0 0 1px rgba(166, 120, 255, .62);
+    }
+
+    /* ---------------- 缩放三角 ---------------- */
+    .zoomer {
+        position: absolute;
+        right: 0; bottom: 0;
+        width: 30px; height: 30px;
+        padding: 0;
+        border: 0;
+        background: none;
+        cursor: ns-resize;
+        display: flex;
+        align-items: flex-end;
+        justify-content: flex-end;
+        z-index: 20;
+    }
+    .zoomer svg { display: block; width: 13px; height: 13px; margin: 0 4px 4px 0; }
+    .zoomer path { fill: rgba(166, 120, 255, .42); transition: fill .14s ease; }
+    .zoomer:hover path { fill: rgba(198, 172, 255, .95); }
+    .zoomer:active path { fill: var(--uv); }
+    .zoomer[data-host="accepted"] path { fill: rgba(166, 120, 255, .68); }
+    .zoomer[data-host="rejected"] path {
+        fill: none;
+        stroke: rgba(166, 120, 255, .50);
+        stroke-width: 1.1;
+    }
+    .zoomer[data-host="rejected"]:hover path { stroke: var(--uv); fill: none; }
+    .zoomer .zpct {
+        position: absolute;
+        right: 20px; bottom: 3px;
+        font-family: var(--mono);
+        font-size: 6px;
+        letter-spacing: .10em;
+        color: var(--uv-dim);
+        opacity: 0;
+        transition: opacity .14s ease;
+        pointer-events: none;
+        white-space: nowrap;
+    }
+    .zoomer:hover .zpct { opacity: 1; }
+    body.dragging-zoom .zoomer .zpct { opacity: 1; }
+
+    /* ---------------- 底栏 ---------------- */
+    footer {
+        flex: none;
+        margin-top: auto;
+        padding-top: 3px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        font-family: var(--mono);
+        text-transform: uppercase;
+    }
+    footer span {
+        font-size: 7px;
+        letter-spacing: .28em;
+        color: rgba(236, 233, 247, .22);
+    }
+    footer .eng { color: rgba(166, 120, 255, .42); }
+    /* ===== 四声道电平表：左 FL/RL、右 FR/RR（左柱内、刻度外；右表镜像） ===== */
+    .mside { display: flex; flex-direction: column; justify-content: space-between; height: 200px; flex: none; }
+    .mside .metercol { position: static; }
+    .bar { height: 78px; }
+    .dbscale { height: 78px; }
+</style>
+</head>
+<body>
+
+<div class="canvas" id="canvas">
+
+<header>
+    <div class="mark">
+        <svg class="mark" viewBox="0 0 16 16" fill="none" aria-hidden="true" style="width:13px;height:13px;flex:none;display:block">
+  <path d="M8.00 8.00 L8.73 8.96 L9.45 9.85 L10.14 10.62 L10.80 11.20 L11.41 11.57 L11.96 11.70 L12.44 11.57 L12.85 11.20 L13.17 10.62 L13.41 9.85 L13.55 8.96 L13.60 8.00 L13.55 7.04 L13.41 6.15 L13.17 5.38 L12.85 4.80 L12.44 4.43 L11.96 4.30 L11.41 4.43 L10.80 4.80 L10.14 5.38 L9.45 6.15 L8.73 7.04 L8.00 8.00 L7.27 8.96 L6.55 9.85 L5.86 10.62 L5.20 11.20 L4.59 11.57 L4.04 11.70 L3.56 11.57 L3.15 11.20 L2.83 10.62 L2.59 9.85 L2.45 8.96 L2.40 8.00 L2.45 7.04 L2.59 6.15 L2.83 5.38 L3.15 4.80 L3.56 4.43 L4.04 4.30 L4.59 4.43 L5.20 4.80 L5.86 5.38 L6.55 6.15 L7.27 7.04 L8.00 8.00" stroke="#a678ff" stroke-width="1" stroke-linejoin="round" stroke-linecap="round"/>
+  <circle cx="8" cy="8" r="1.35" fill="#a678ff"/>
+</svg>
+        <span class="brand">LISSAJOUS</span>
+    </div>
+    <span class="tag">Quad Doppler</span>
+</header>
+
+<section class="stage">
+    <div class="mside left">
+        <div class="metercol">
+            <span>FL</span>
+            <div class="meterbody">
+                <div class="bar"><i id="mtrFL"></i><b id="capFL"></b></div>
+                <div class="dbscale" id="scaleFL"></div>
+            </div>
+        </div>
+        <div class="metercol">
+            <span>RL</span>
+            <div class="meterbody">
+                <div class="bar"><i id="mtrRL"></i><b id="capRL"></b></div>
+                <div class="dbscale" id="scaleRL"></div>
+            </div>
+        </div>
+    </div>
+
+    <div class="scopecol">
+        <div class="scope" id="scope">
+            <svg viewBox="0 0 200 200" aria-hidden="true">
+                <defs>
+                    <radialGradient id="beamGlow" cx="50%" cy="50%" r="50%">
+                        <stop offset="0%" stop-color="rgba(166,120,255,0.55)"/>
+                        <stop offset="100%" stop-color="rgba(166,120,255,0)"/>
+                    </radialGradient>
+                </defs>
+
+                <!-- 示波器网格 -->
+                <g class="grid" id="grid"></g>
+
+                <!-- 解析导引曲线（JS 注入） -->
+                <path class="guide" id="guide" d=""></path>
+
+                <!-- 余晖轨迹（合成轴 · JS 注入） -->
+                <g class="trail" id="trail"></g>
+
+
+
+                <!-- 十字准线 + 光点 -->
+                <g class="cross">
+                    <line id="cxLine" x1="100" y1="0" x2="100" y2="200"/>
+                    <line id="cyLine" x1="0" y1="100" x2="200" y2="100"/>
+                </g>
+                <g class="beam" id="beam">
+                    <circle class="halo" r="9"></circle>
+                    <circle class="core" r="2.1"></circle>
+                </g>
+
+                <rect class="frame" x="0.5" y="0.5" width="199" height="199"/>
+                <!-- 四角括号 -->
+                <path class="bracket" d="M 0.5 14 L 0.5 0.5 L 14 0.5"/>
+                <path class="bracket" d="M 186 0.5 L 199.5 0.5 L 199.5 14"/>
+                <path class="bracket" d="M 199.5 186 L 199.5 199.5 L 186 199.5"/>
+                <path class="bracket" d="M 14 199.5 L 0.5 199.5 L 0.5 186"/>
+            </svg>
+            <!-- 荧光暂留层：输入轴驱动时在这里累积波形轨迹 -->
+            <canvas id="phosphor" width="200" height="200" style="display:none"></canvas>
+        </div>
+        <div class="fread" id="fread">2 : 1 · φ 90°</div>
+    </div>
+
+    <div class="mside right">
+        <div class="metercol">
+            <span>FR</span>
+            <div class="meterbody mirror">
+                <div class="bar"><i id="mtrFR"></i><b id="capFR"></b></div>
+                <div class="dbscale" id="scaleFR"></div>
+            </div>
+        </div>
+        <div class="metercol">
+            <span>RR</span>
+            <div class="meterbody mirror">
+                <div class="bar"><i id="mtrRR"></i><b id="capRR"></b></div>
+                <div class="dbscale" id="scaleRR"></div>
+            </div>
+        </div>
+    </div>
+</section>
+
+<section class="src">
+    <div class="srow">
+        <span class="stag">X</span>
+        <div class="seg" id="segX" data-ch="xsrc">
+            <button type="button" data-v="0" class="on">SIN</button>
+            <button type="button" data-v="1">IN L</button>
+            <button type="button" data-v="2">IN R</button>
+            <button type="button" data-v="3">IN M</button>
+        </div>
+    </div>
+    <div class="srow">
+        <span class="stag">Y</span>
+        <div class="seg" id="segY" data-ch="ysrc">
+            <button type="button" data-v="0" class="on">SIN</button>
+            <button type="button" data-v="1">IN L</button>
+            <button type="button" data-v="2">IN R</button>
+            <button type="button" data-v="3">IN M</button>
+        </div>
+    </div>
+    <div class="srow">
+        <span class="stag">Wave</span>
+        <div class="seg" id="segW" data-ch="wave">
+            <button type="button" data-v="0" class="on">SIN</button>
+            <button type="button" data-v="1">TRI</button>
+            <button type="button" data-v="2">SAW</button>
+            <button type="button" data-v="3">SQR</button>
+        </div>
+    </div>
+</section>
+
+<div class="glab">Figure</div>
+<section class="knobs r1">
+    <div class="knob" id="kRate">
+        <svg viewBox="0 0 56 56">
+            <circle class="plate" cx="28" cy="28" r="20"></circle>
+            <g id="tRate"></g>
+            <circle class="gauge" id="gRate" cx="28" cy="28" r="23" transform="rotate(135 28 28)"></circle>
+            <circle class="arc" id="aRate" cx="28" cy="28" r="23" transform="rotate(135 28 28)"></circle>
+        </svg>
+        <input class="kval" id="vRate" type="text" inputmode="decimal" value="0.40" spellcheck="false" autocomplete="off">
+        <div class="klab">Rate</div>
+    </div>
+
+    <div class="knob" id="kRatio">
+        <svg viewBox="0 0 56 56">
+            <circle class="plate" cx="28" cy="28" r="20"></circle>
+            <g id="tRatio"></g>
+            <circle class="gauge" id="gRatio" cx="28" cy="28" r="23" transform="rotate(135 28 28)"></circle>
+            <circle class="arc" id="aRatio" cx="28" cy="28" r="23" transform="rotate(135 28 28)"></circle>
+        </svg>
+        <input class="kval" id="vRatio" type="text" inputmode="decimal" value="2.000" spellcheck="false" autocomplete="off">
+        <div class="klab">Ratio</div>
+    </div>
+
+    <div class="knob" id="kPhase">
+        <svg viewBox="0 0 56 56">
+            <circle class="plate" cx="28" cy="28" r="20"></circle>
+            <g id="tPhase"></g>
+            <circle class="gauge" id="gPhase" cx="28" cy="28" r="23" transform="rotate(135 28 28)"></circle>
+            <circle class="arc" id="aPhase" cx="28" cy="28" r="23" transform="rotate(135 28 28)"></circle>
+        </svg>
+        <input class="kval" id="vPhase" type="text" inputmode="decimal" value="90" spellcheck="false" autocomplete="off">
+        <div class="klab">Phase °</div>
+    </div>
+
+    <div class="knob" id="kScale">
+        <svg viewBox="0 0 56 56">
+            <circle class="plate" cx="28" cy="28" r="20"></circle>
+            <g id="tScale"></g>
+            <circle class="gauge" id="gScale" cx="28" cy="28" r="23" transform="rotate(135 28 28)"></circle>
+            <circle class="arc" id="aScale" cx="28" cy="28" r="23" transform="rotate(135 28 28)"></circle>
+        </svg>
+        <input class="kval" id="vScale" type="text" inputmode="decimal" value="0.800" spellcheck="false" autocomplete="off">
+        <div class="klab">Scale</div>
+    </div>
+</section>
+
+<div class="glab">Motion</div>
+<section class="knobs r2">
+    <div class="knob" id="kChaos">
+        <svg viewBox="0 0 56 56">
+            <circle class="plate" cx="28" cy="28" r="20"></circle>
+            <g id="tChaos"></g>
+            <circle class="gauge" id="gChaos" cx="28" cy="28" r="23" transform="rotate(135 28 28)"></circle>
+            <circle class="arc" id="aChaos" cx="28" cy="28" r="23" transform="rotate(135 28 28)"></circle>
+        </svg>
+        <input class="kval" id="vChaos" type="text" inputmode="decimal" value="0.004" spellcheck="false" autocomplete="off">
+        <div class="klab">Chaos</div>
+    </div>
+
+    <div class="knob" id="kGlide">
+        <svg viewBox="0 0 56 56">
+            <circle class="plate" cx="28" cy="28" r="20"></circle>
+            <g id="tGlide"></g>
+            <circle class="gauge" id="gGlide" cx="28" cy="28" r="23" transform="rotate(135 28 28)"></circle>
+            <circle class="arc" id="aGlide" cx="28" cy="28" r="23" transform="rotate(135 28 28)"></circle>
+        </svg>
+        <input class="kval" id="vGlide" type="text" inputmode="decimal" value="0.020" spellcheck="false" autocomplete="off">
+        <div class="klab">Glide</div>
+    </div>
+
+    <div class="knob" id="kInGain">
+        <svg viewBox="0 0 56 56">
+            <circle class="plate" cx="28" cy="28" r="20"></circle>
+            <g id="tInGain"></g>
+            <circle class="gauge" id="gInGain" cx="28" cy="28" r="23" transform="rotate(135 28 28)"></circle>
+            <circle class="arc" id="aInGain" cx="28" cy="28" r="23" transform="rotate(135 28 28)"></circle>
+        </svg>
+        <input class="kval" id="vInGain" type="text" inputmode="decimal" value="2.00" spellcheck="false" autocomplete="off">
+        <div class="klab">In Gain</div>
+    </div>
+</section>
+
+<div class="glab">Space</div>
+<section class="knobs r3">
+    <div class="knob" id="kRoom">
+        <svg viewBox="0 0 56 56">
+            <circle class="plate" cx="28" cy="28" r="20"></circle>
+            <g id="tRoom"></g>
+            <circle class="gauge" id="gRoom" cx="28" cy="28" r="23" transform="rotate(135 28 28)"></circle>
+            <circle class="arc" id="aRoom" cx="28" cy="28" r="23" transform="rotate(135 28 28)"></circle>
+        </svg>
+        <input class="kval" id="vRoom" type="text" inputmode="decimal" value="50" spellcheck="false" autocomplete="off">
+        <div class="klab">Room</div>
+    </div>
+
+    <div class="knob" id="kCut">
+        <svg viewBox="0 0 56 56">
+            <circle class="plate" cx="28" cy="28" r="20"></circle>
+            <g id="tCut"></g>
+            <circle class="gauge" id="gCut" cx="28" cy="28" r="23" transform="rotate(135 28 28)"></circle>
+            <circle class="arc" id="aCut" cx="28" cy="28" r="23" transform="rotate(135 28 28)"></circle>
+        </svg>
+        <input class="kval" id="vCut" type="text" inputmode="decimal" value="16000" spellcheck="false" autocomplete="off">
+        <div class="klab">Cutoff</div>
+    </div>
+
+    <div class="knob" id="kGain">
+        <svg viewBox="0 0 56 56">
+            <circle class="plate" cx="28" cy="28" r="20"></circle>
+            <g id="tGain"></g>
+            <circle class="gauge" id="gGain" cx="28" cy="28" r="23" transform="rotate(135 28 28)"></circle>
+            <circle class="arc" id="aGain" cx="28" cy="28" r="23" transform="rotate(135 28 28)"></circle>
+        </svg>
+        <input class="kval" id="vGain" type="text" inputmode="decimal" value="2.00" spellcheck="false" autocomplete="off">
+        <div class="klab">Master Gain</div>
+    </div>
+</section>
+
+<section class="wet">
+    <div class="ls">Wet Send · Min / Max</div>
+    <div class="dual" id="dual">
+        <div class="ticks"></div>
+        <div class="track"></div>
+        <div class="range" id="wetRange"></div>
+        <div class="thumb" id="thumbMin"></div>
+        <div class="thumb" id="thumbMax"></div>
+    </div>
+    <div class="vals">
+        <input class="wval" id="wetMinOut" type="text" inputmode="decimal" value="0.10" spellcheck="false" autocomplete="off">
+        <input class="wval" id="wetMaxOut" type="text" inputmode="decimal" value="0.35" spellcheck="false" autocomplete="off">
+    </div>
+</section>
+
+<footer>
+    <span>Cabbage 3</span>
+    <span class="eng">Lissajous Figure</span>
+</footer>
+
+</div><!-- /.canvas -->
+
+<button class="zoomer" id="zoomer" type="button"
+        aria-label="拖动缩放界面，双击回到 100%"
+        title="往右下拖变大、往左上拖变小 · 双击回到 100%">
+    <span class="zpct" id="zpct">100%</span>
+    <svg viewBox="0 0 10 10" aria-hidden="true"><path d="M10 2.6 L2.6 10 L10 10 Z"/></svg>
+</button>
+
+<script type="module">
+import { Cabbage } from './cabbage/cabbage.js';
+
+const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
+const $ = id => document.getElementById(id);
+
+/* ---------------- 参数表 ----------------
+   范围 / 默认值必须与 CSD 的 <Cabbage> 完全一致。
+   def 必须等于 CSD 里该通道的 defaultValue —— 双击归位回到的就是它。 */
+/* curve 是纯前端手感，不写进 CSD（宿主只认值）：
+   rate 0.02~4（200×）→ k=4；ratio 1~8（8×，常用 1~2）→ k=1.5；ratio 步长 0.125；
+   glide 0.001~0.4（400×）→ k=5；chaos 低端要留手调 → k=2；
+   phase / scale 是角度与幅度 → 线性；roomSize → 1；cutoff → 3；gain → 线性。 */
+const P = {
+    rate:      { min: 0.02, max: 4,     curve: 4,   step: 0.01,  def: 0.4,   fmt: v => v.toFixed(2) },
+    ratio:     { min: 1,    max: 8,     curve: 1.5, step: 0.125, def: 2,     fmt: v => v.toFixed(3) },
+    phase:     { min: 0,    max: 360,   curve: 0,   step: 0.1,   def: 90,    fmt: v => String(Math.round(v)) },
+    scale:     { min: 0.05, max: 1,     curve: 0,   step: 0.001, def: 0.8,   fmt: v => v.toFixed(3) },
+    chaos:     { min: 0,    max: 0.1,   curve: 2,   step: 0.001, def: 0.004, fmt: v => v.toFixed(3) },
+    glide:     { min: 0.001,max: 0.4,   curve: 5,   step: 0.001, def: 0.02,  fmt: v => v.toFixed(3) },
+    inGain:    { min: 0.1,  max: 16,    curve: 2,   step: 0.01,  def: 2,     fmt: v => v.toFixed(2) },
+    roomSize:  { min: 10,   max: 100,   curve: 1,   step: 0.1,   def: 50,    fmt: v => String(Math.round(v)) },
+    cutoff:    { min: 1000, max: 16000, curve: 3,   step: 1,     def: 16000,
+                 fmt: v => String(Math.round(v)) },
+    masterGain:{ min: 0,    max: 8,     curve: 0,   step: 0.01,  def: 2,     fmt: v => v.toFixed(2) }
+};
+
+/* 湿声上下限不属于旋钮表，单独给默认值 */
+const WET_DEF = { minWet: 0.1, maxWet: 0.35 };
+
+/* 必须与 CSD 中 widget 的书写顺序一致（只含 automatable:true 的通道） */
+const PARAM_IDX = ['rate', 'ratio', 'phase', 'scale', 'chaos', 'glide',
+                   'inGain', 'xsrc', 'ysrc', 'wave',
+                   'minWet', 'maxWet', 'roomSize', 'cutoff', 'masterGain'];
+
+let rate = 0.4, ratio = 2, phase = 90, scaleV = 0.8;
+let chaos = 0.004, glide = 0.02, inGain = 2;
+/* 源选择：0 = 合成轴，1 = IN L，2 = IN R，3 = IN M；wave：0 = sin, 1 = tri, 2 = saw, 3 = sqr */
+let xsrc = 0, ysrc = 0, wave = 0;
+let room = 50, cut = 16000, gain = 2;
+let minWet = 0.1, maxWet = 0.35;
+
+let lvlFL = 0, lvlFR = 0, lvlRL = 0, lvlRR = 0;
+
+const dragOn = { rate: false, ratio: false, phase: false, scale: false, chaos: false,
+                 glide: false, inGain: false, roomSize: false, cutoff: false, masterGain: false,
+                 wet: null, zoom: false };
+
+/* 拖拽独占：屏蔽输入框的原生选择/拖影 */
+function beginDrag() {
+    document.body.classList.add('dragging');
+    const sel = window.getSelection();
+    if (sel) sel.removeAllRanges();
+}
+function endDrag() { document.body.classList.remove('dragging'); }
+
+const anyDrag = () => document.body.classList.contains('dragging') ||
+                       document.body.classList.contains('dragging-zoom') ||
+                       Object.values(dragOn).some(Boolean);
+for (const ev of ['selectstart', 'dragstart']) {
+    document.addEventListener(ev, e => {
+        /* 输入框里必须允许选中文本，否则没法改数值 */
+        if (e.target && e.target.closest && e.target.closest('input')) return;
+        if (anyDrag()) e.preventDefault();
+    });
+}
+
+window.addEventListener('blur', () => {
+    for (const k of Object.keys(dragOn)) {
+        if (k === 'wet') dragOn.wet = null; else dragOn[k] = false;
+    }
+    document.body.classList.remove('dragging');
+    document.body.classList.remove('dragging-zoom');
+});
+
+/* ---------------- 数值解析 ---------------- */
+function parseNum(raw, p) {
+    let t = String(raw).trim().toLowerCase().replace(/\s+/g, '');
+    if (!t) return NaN;
+    let mul = 1;
+    if (t.endsWith('k')) { mul = 1000; t = t.slice(0, -1); }
+    else if (t.endsWith('hz')) { t = t.slice(0, -2); }
+    const n = parseFloat(t);
+    if (!isFinite(n)) return NaN;
+    const v = n * mul;
+    return clamp(Math.round(v / p.step) * p.step, p.min, p.max);
+}
+
+const knobVal = key => ({
+    rate: rate, ratio: ratio, phase: phase, scale: scaleV, chaos: chaos,
+    glide: glide, inGain: inGain, roomSize: room, cutoff: cut, masterGain: gain
+})[key];
+const setKnobVal = (key, v) => {
+    switch (key) {
+        case 'rate': rate = v; break;
+        case 'ratio': ratio = v; break;
+        case 'phase': phase = v; break;
+        case 'scale': scaleV = v; break;
+        case 'chaos': chaos = v; break;
+        case 'glide': glide = v; break;
+        case 'inGain': inGain = v; break;
+        case 'roomSize': room = v; break;
+        case 'cutoff': cut = v; break;
+        case 'masterGain': gain = v; break;
+    }
+};
+
+/* ---------------- 旋钮 ---------------- */
+const KNOB_IDS = {
+    rate:     { arc: 'aRate',    txt: 'vRate' },
+    ratio:    { arc: 'aRatio',   txt: 'vRatio' },
+    phase:    { arc: 'aPhase',   txt: 'vPhase' },
+    scale:    { arc: 'aScale',   txt: 'vScale' },
+    chaos:    { arc: 'aChaos',   txt: 'vChaos' },
+    glide:    { arc: 'aGlide',   txt: 'vGlide' },
+    inGain:   { arc: 'aInGain',  txt: 'vInGain' },
+    roomSize: { arc: 'aRoom',    txt: 'vRoom' },
+    cutoff:   { arc: 'aCut',     txt: 'vCut' },
+    masterGain: { arc: 'aGain',  txt: 'vGain' }
+};
+const KB = { r: 23, span: 0.75 };
+const CIRC = 2 * Math.PI * KB.r;
+const SPAN = CIRC * KB.span;
+
+/* ---------------- 旋钮映射曲线（全系列同一套，见模板 §6.16）
+   归一化值 n ∈ [0,1] ↔ 旋钮行程 f ∈ [0,1]，一个数 curve 定整条曲线：
+     curve = 0    线性
+     curve = k>0  指数：低端展开（时间 / 频率这类跨数量级参数必须给）
+     curve = k<0  反向：高端展开
+   n = (e^(k·f) − 1) / (e^k − 1)      f = ln(1 + n·(e^k − 1)) / k
+   两式严格互逆，拖动 → 写值 → 回灌 → 重画不会漂。 */
+const CURVE_MAX_K = 12;                 // e^12 ≈ 1.6e5，防溢出
+const curveToNorm = (f, k) => {
+    if (!k) return f;
+    const K = Math.min(Math.abs(k), CURVE_MAX_K), A = Math.exp(K) - 1;
+    return k > 0 ? (Math.exp(K * f) - 1) / A
+                 : 1 - (Math.exp(K * (1 - f)) - 1) / A;
+};
+const normToCurve = (n, k) => {
+    if (!k) return n;
+    const K = Math.min(Math.abs(k), CURVE_MAX_K), A = Math.exp(K) - 1;
+    return k > 0 ? Math.log(1 + n * A) / K
+                 : 1 - Math.log(1 + (1 - n) * A) / K;
+};
+
+const toFrac   = (v, p) => normToCurve(clamp((v - p.min) / (p.max - p.min), 0, 1), p.curve || 0);
+const fromFrac = (f, p) => p.min + (p.max - p.min) * curveToNorm(clamp(f, 0, 1), p.curve || 0);
+
+function buildTicks(groupId) {
+    const g = $(groupId);
+    const NS = 'http://www.w3.org/2000/svg';
+    for (let i = 0; i <= 20; i++) {
+        const f = i / 20;
+        const deg = 225 + f * 270;
+        const rad = deg * Math.PI / 180;
+        const major = i % 5 === 0;
+        const r1 = major ? 25.4 : 26.0;
+        const r2 = 27.6;
+        const line = document.createElementNS(NS, 'line');
+        line.setAttribute('x1', (28 + r1 * Math.sin(rad)).toFixed(2));
+        line.setAttribute('y1', (28 - r1 * Math.cos(rad)).toFixed(2));
+        line.setAttribute('x2', (28 + r2 * Math.sin(rad)).toFixed(2));
+        line.setAttribute('y2', (28 - r2 * Math.cos(rad)).toFixed(2));
+        line.setAttribute('class', major ? 'tick major' : 'tick');
+        g.appendChild(line);
+    }
+}
+
+/* 编辑态：正在敲的输入框不要被后端推送覆盖 */
+const editing = { key: null, el: null, knob: null };
+const DBL_MS = 350;
+let lastTapAt = 0, lastTapKey = null;
+
+function paintKnob(key) {
+    const p = P[key];
+    const v = knobVal(key);
+    const f = toFrac(clamp(v, p.min, p.max), p);
+    const ids = KNOB_IDS[key];
+    $(ids.arc).setAttribute('stroke-dasharray', (f * SPAN).toFixed(2) + ' ' + CIRC.toFixed(2));
+    if (editing.key === key) return;
+    $(ids.txt).value = p.fmt(v);
+}
+
+function openEditor(key, el) {
+    if (editing.el === el) { el.select(); return; }
+    closeEditor(true);
+    editing.key = key;
+    editing.el = el;
+    editing.knob = el.closest('.knob');
+    if (editing.knob) editing.knob.classList.add('editing');
+    el.value = P[key].fmt(knobVal(key));
+    el.focus();
+    el.select();
+}
+
+function closeEditor(silent) {
+    const el = editing.el;
+    if (!el) return;
+    const wasKey = editing.key;
+    editing.key = null;
+    editing.el = null;
+    if (editing.knob) editing.knob.classList.remove('editing');
+    editing.knob = null;
+    if (!silent) { el.blur(); if (wasKey) paintKnob(wasKey); }
+}
+
+function commitEdit() {
+    const key = editing.key;
+    if (!key) return;
+    const v = parseNum(editing.el.value, P[key]);
+    closeEditor();
+    if (!isFinite(v)) { paintKnob(key); return; }
+    setKnobVal(key, v);
+    paintKnob(key);
+    paintFigure();
+    Cabbage.sendControlData({ channel: key, value: v, gesture: 'complete' }, null);
+}
+
+function resetKnob(key) {
+    const d = P[key].def;
+    setKnobVal(key, d);
+    paintKnob(key);
+    paintFigure();
+    Cabbage.sendControlData({ channel: key, value: d, gesture: 'complete' }, null);
+}
+
+function bindKnob(elId, key) {
+    const el = $(elId);
+    const p = P[key];
+    const txt = $(KNOB_IDS[key].txt);
+    /* 统一 tap 逻辑：不在 pointerdown 里按 target 分叉，
+       否则第二次点击会绕过双击判定，导致归位失效。 */
+    let startY = 0, startX = 0, accF = 0, lastY = 0, dragging = false, active = false, onInput = false, moved = false;
+
+    el.addEventListener('pointerdown', e => {
+        if (e.button !== 0) return;
+        active = true;
+        dragging = false;
+        onInput = (e.target === txt);
+        startX = e.clientX;
+        moved = false;
+        startY = e.clientY;
+        accF = toFrac(clamp(knobVal(key), p.min, p.max), p);
+        lastY = e.clientY;
+        if (!onInput) {
+            el.setPointerCapture(e.pointerId);
+            e.preventDefault();
+        }
+    });
+
+    el.addEventListener('pointermove', e => {
+        if (!active) return;
+        /* 编辑态：只记录有没有发生选词拖动，绝不旋钮拖动 */
+        if (onInput) {
+            if (Math.abs(e.clientX - startX) > 3 || Math.abs(e.clientY - startY) > 3) moved = true;
+            return;
+        }
+        const dy = startY - e.clientY;
+        if (!dragging) {
+            if (Math.abs(dy) < 3) return;                 // 死区：留给单击编辑
+            dragging = true;
+            dragOn[key] = true;
+            beginDrag();
+            closeEditor(true);
+            Cabbage.sendControlData({ channel: key, value: knobVal(key), gesture: 'begin' }, null);
+        }
+        e.preventDefault();
+        /* Shift 精调：同样位移只走 1/5 行程。
+           ★ 必须按「每帧增量」累加，不能用 (起点 → 当前) 的总位移：
+             否则拖动中途按下/松开 Shift，分母突变，数值会瞬间跳一大截。 */
+        accF = clamp(accF + (lastY - e.clientY) / (e.shiftKey ? 750 : 150), 0, 1);
+        lastY = e.clientY;
+        let v = fromFrac(accF, p);
+        v = clamp(Math.round(v / p.step) * p.step, p.min, p.max);
+        setKnobVal(key, v);
+        paintKnob(key);
+        paintFigure();
+        Cabbage.sendControlData({ channel: key, value: v, gesture: 'value' }, null);
+    });
+
+    const up = e => {
+        if (!active) return;
+        active = false;
+        const wasInput = onInput;
+        const wasMoved = moved;
+        onInput = false;
+        moved = false;
+        try { el.releasePointerCapture(e.pointerId); } catch (_) {}
+
+        if (dragging) {
+            dragging = false;
+            dragOn[key] = false;
+            endDrag();
+            Cabbage.sendControlData({ channel: key, value: knobVal(key), gesture: 'end' }, null);
+            return;
+        }
+
+        /* 在文本框里拖动 = 选词，不算点击，更不能触发归位 */
+        if (wasMoved) { lastTapAt = 0; lastTapKey = null; return; }
+
+        /* 未拖动 = 单击。两次 tap 间隔 < DBL_MS → 归位 */
+        const now = performance.now();
+        if (lastTapKey === key && now - lastTapAt < DBL_MS) {
+            lastTapAt = 0; lastTapKey = null;
+            closeEditor();
+            resetKnob(key);
+            return;
+        }
+        lastTapAt = now; lastTapKey = key;
+        if (!wasInput) openEditor(key, txt);
+    };
+    el.addEventListener('pointerup', up);
+    el.addEventListener('pointercancel', up);
+    el.addEventListener('contextmenu', e => e.preventDefault());
+
+    txt.addEventListener('keydown', e => {
+        e.stopPropagation();
+        if (e.key === 'Enter') { e.preventDefault(); commitEdit(); }
+        else if (e.key === 'Escape') {
+            e.preventDefault();
+            const k = editing.key;
+            closeEditor();
+            if (k) paintKnob(k);
+        }
+    });
+    txt.addEventListener('blur', () => { if (editing.key === key) commitEdit(); });
+    /* 不 stopPropagation：编辑态下第二击的 target 是 input，
+       若挡住冒泡，knob 收不到 pointerdown，双击归位永远不触发。
+       拖动由 pointermove 里的 onInput 守卫拦住。 */
+    txt.addEventListener('dblclick', e => {
+        e.preventDefault(); e.stopPropagation();
+        closeEditor();
+        resetKnob(key);
+    });
+}
+
+/* ---------------- 李萨如示波器 ---------------- */
+const SCOPE = 200;                       // viewBox 尺寸，== .scope 的 CSS 像素
+const guideEl = $('guide');
+const trailEl = $('trail');
+const NS = 'http://www.w3.org/2000/svg';
+
+/* ★ 与 CSD 完全相同的一套参数：ratio 量化到 1/8，x 相位在一圈里跨 FIG_DEN 个周期。
+   两边必须逐字同构，否则「画的线」和「走的线」就会分家。 */
+const FIG_DEN = 8;                       // CSD 里 kPhAcc 的绕回长度（x 周期数）
+
+const gcd = (a, b) => (b ? gcd(b, a % b) : a);
+
+/* ratio 的格子表示：p 个 y 周期 / q 个 x 周期（q 恒为 FIG_DEN，可约分） */
+function lattice(r) {
+    const p = Math.round(r * FIG_DEN);   // ratio ∈ 1/8 的整数倍 → p 恒为整数
+    const g = gcd(p, FIG_DEN);
+    return { p: p, q: FIG_DEN, pr: p / g, qr: FIG_DEN / g };
+}
+
+/* 轴一旦被输入音频驱动，图就不再是「解析可预测」的：
+   导引线会画错（用户看到过光点不按线走），所以直接隐藏，改用采样点云。 */
+const audioAxis = () => xsrc !== 0 || ysrc !== 0;
+const AXIS_LABEL = ['SIN', 'IN L', 'IN R', 'IN M'];
+let uiMode = null;
+
+/* 解析李萨如图：与 CSD 里 instr 1 的两条波形完全同构。
+   这是「理想蓝图」，光点坐标仍由 DSP 以 60Hz 送来。 */
+function paintFigure() {
+    const audio = audioAxis();
+    if (uiMode !== audio) {
+        uiMode = audio;
+        trailEl.style.display = audio ? 'none' : '';
+        $('phosphor').style.display = audio ? '' : 'none';
+        $('beam').style.display = '';
+        while (trailEl.firstChild) trailEl.removeChild(trailEl.firstChild);
+        buildTrail();
+        clearPhosphor();                     /* 切模式时清掉上一轮的残留 */
+        if (audio) ensurePhosLoop();
+    }
+
+    if (audio) {
+        guideEl.setAttribute('d', '');
+        $('fread').textContent = AXIS_LABEL[xsrc] + ' × ' + AXIS_LABEL[ysrc] +
+            ((xsrc === 0 || ysrc === 0) ? ' · φ ' + Math.round(phase) + '°' : '');
+        placeBeam(clamp(lisX, 0, 1) * SCOPE, (1 - clamp(lisY, 0, 1)) * SCOPE);
+        return;
+    }
+
+    const p = lattice(ratio).p;
+    const q = FIG_DEN;
+    /* 用格子化的 ratio 画线：宿主送来 2.361 时 DSP 用的是 2.375，两边必须一致 */
+    const rq = p / FIG_DEN;
+    /* 点数按 y 周期数给：p 最大 64，太小会把曲线画成折线 */
+    const N = Math.max(1200, Math.ceil(p * 36));
+    const ph0 = phase / 360;
+    let d = '';
+    for (let i = 0; i <= N; i++) {
+        const u = (i / N) * q;
+        const x = 0.5 + 0.5 * scaleV * waveShape(u + ph0, wave);
+        const y = 0.5 + 0.5 * scaleV * waveShape(u * rq, wave);
+        const px = clamp(x, 0, 1) * SCOPE;
+        const py = (1 - clamp(y, 0, 1)) * SCOPE;
+        d += (i ? 'L' : 'M') + px.toFixed(2) + ' ' + py.toFixed(2);
+    }
+    guideEl.setAttribute('d', d);
+    const L = lattice(ratio);
+    $('fread').textContent = L.pr + ' : ' + L.qr + ' · φ ' + Math.round(phase) + '°';
+    paintMotion();                       /* 形状变了，光点/余晖要跟着落到新线上 */
+}
+
+/* 四种周期波形：必须与 CSD 的 WaveShape 逐字一致（0 sin / 1 tri / 2 saw / 3 sqr） */
+function waveShape(p, w) {
+    const q = p - Math.floor(p);
+    switch (w | 0) {
+        case 1: return q < 0.25 ? 4 * q : (q < 0.75 ? 2 - 4 * q : 4 * q - 4);
+        case 2: { const t = q + 0.5 - Math.floor(q + 0.5); return 2 * t - 1; }
+        case 3: return q < 0.5 ? 1 : -1;
+        default: return Math.sin(2 * Math.PI * q);
+    }
+}
+
+/* 曲线上的点：与 CSD 的两条波形逐字同构。u 是 x 周期数（0 ~ FIG_DEN）。 */
+function pointAt(u) {
+    const p = lattice(ratio).p;
+    const ph0 = phase / 360;
+    const x = 0.5 + 0.5 * scaleV * waveShape(u + ph0, wave);
+    const y = 0.5 + 0.5 * scaleV * waveShape(u * (p / FIG_DEN), wave);
+    return [clamp(x, 0, 1) * SCOPE, (1 - clamp(y, 0, 1)) * SCOPE];
+}
+
+/* ★ 光点与余晖都由「相位 + 公式」算出来，不再靠消息里的坐标逐点连线：
+   高 Rate 时一帧要跨几十像素，逐点连线会在图上拉出弦（看上去像突然折回）。
+   现在余晖是沿曲线向后取样，帧率再低也是贴着线的。 */
+const TRAIL_N = 36;                      // 余晖段数
+const TRAIL_STEP = 2.6;                  // 每段的目标屏幕长度（px）：按弧长取样，密度自适应
+const trailNodes = [];
+let phaseU = 0;                          // DSP 送来的 x 周期数
+let lisX = 0.5, lisY = 0.5;              // DSP 送来的实际渲染坐标（输入轴驱动时用）
+
+function buildTrail() {
+    trailNodes.length = 0;
+    while (trailEl.firstChild) trailEl.removeChild(trailEl.firstChild);
+    for (let i = 0; i < TRAIL_N; i++) {
+        const seg = document.createElementNS(NS, 'line');
+        const t = (i + 1) / TRAIL_N;
+        seg.setAttribute('stroke-width', (0.6 + t * 1.0).toFixed(2));
+        seg.setAttribute('opacity', (0.05 + t * t * 0.80).toFixed(3));
+        trailEl.appendChild(seg);
+        trailNodes.push(seg);
+    }
+}
+
+function placeBeam(px, py) {
+    $('beam').setAttribute('transform', 'translate(' + px.toFixed(2) + ' ' + py.toFixed(2) + ')');
+    $('cxLine').setAttribute('x1', px.toFixed(2));
+    $('cxLine').setAttribute('x2', px.toFixed(2));
+    $('cyLine').setAttribute('y1', py.toFixed(2));
+    $('cyLine').setAttribute('y2', py.toFixed(2));
+}
+
+function paintMotion() {
+    const [bx, by] = pointAt(phaseU);
+    placeBeam(bx, by);
+
+    /* 尾迹：沿曲线往回按「弧长」取样，每段固定 2.6px。
+       若按固定相位步长取样，ratio 一大曲线就很密，步长换算成像素会到 20px 以上 ——
+       看上去还是折线（弦）。按弧长取才能在任何格子上都贴着线走。 */
+    let u = phaseU;
+    let prev = [bx, by];
+    const EPS = 1e-3;
+    for (let i = 0; i < TRAIL_N; i++) {
+        const a = pointAt(u);
+        const b = pointAt(u - EPS);
+        const speed = Math.hypot(a[0] - b[0], a[1] - b[1]) / EPS;   /* px / x周期 */
+        if (!(speed > 1e-6)) {
+            trailNodes[i].setAttribute('opacity', '0');
+            continue;
+        }
+        u = (((u - TRAIL_STEP / speed) % FIG_DEN) + FIG_DEN) % FIG_DEN;
+        const cur = pointAt(u);
+        const seg = trailNodes[i];
+        seg.setAttribute('opacity', (0.05 + Math.pow((i + 1) / TRAIL_N, 2) * 0.80).toFixed(3));
+        seg.setAttribute('x1', prev[0].toFixed(2));
+        seg.setAttribute('y1', prev[1].toFixed(2));
+        seg.setAttribute('x2', cur[0].toFixed(2));
+        seg.setAttribute('y2', cur[1].toFixed(2));
+        prev = cur;
+    }
+}
+
+/* 同一帧里只画一次：60Hz 推送 + rAF 合流，避免一个显示帧里重复重绘 */
+let beamRaf = 0;
+function scheduleMotion() {
+    if (beamRaf) return;
+    beamRaf = requestAnimationFrame(() => {
+        beamRaf = 0;
+        paintMotion();
+    });
+}
+
+/* ---------------- 输入轴驱动时的荧光轨迹 ----------------
+   输入轴是音频速率，任何「消息采样」都不可能把波形完整传过来。
+   所以不做累积式余辉（那会把画面糊成一团），而是把每个采样点连同时刻
+   存进环形缓冲，每帧「清屏后重画最近 2 s 的点」：
+     · 消散时间精确 = PHOS_LIFE，与帧率无关（120 Hz 屏也一样）
+     · 旧点真的被丢掉，不会留下洗不掉的底噪
+     · 每个点的透明度按剩余寿命衰减，尾巴自然变细变淡 */
+const PHOS_LIFE = 2000;                  /* ms：轨迹点存活时间 = 消散时间 */
+const PHOS_MAXPTS = 1200;                /* 缓冲上限（150 Hz × 2 s = 300，留余量） */
+const PHOS_LINK = 26;                    /* px：超过这个距离就不连线，避免拉出蛛网 */
+const phosPts = [];                      /* { x, y, t } */
+let phosCtx = null, phosDpr = 1, phosRaf = 0;
+let phosSprite = null;
+
+/* 预渲染一颗软光斑：每帧要画几百个点，用 drawImage 比每点建径向渐变快一个量级 */
+function buildSprite() {
+    const R = 8;
+    const cv = document.createElement('canvas');
+    cv.width = cv.height = R * 2;
+    const g = cv.getContext('2d');
+    const grad = g.createRadialGradient(R, R, 0, R, R, R);
+    grad.addColorStop(0, 'rgba(216,196,255,1)');
+    grad.addColorStop(0.30, 'rgba(176,138,255,0.62)');
+    grad.addColorStop(0.65, 'rgba(150,108,255,0.18)');
+    grad.addColorStop(1, 'rgba(150,108,255,0)');
+    g.fillStyle = grad;
+    g.fillRect(0, 0, R * 2, R * 2);
+    return { canvas: cv, r: R };
+}
+
+function initPhosphor() {
+    const cv = $('phosphor');
+    phosDpr = Math.min(window.devicePixelRatio || 1, 2);
+    cv.width = Math.round(SCOPE * phosDpr);
+    cv.height = Math.round(SCOPE * phosDpr);
+    phosCtx = cv.getContext('2d');
+    phosCtx.setTransform(phosDpr, 0, 0, phosDpr, 0, 0);
+    phosSprite = buildSprite();
+    clearPhosphor();
+}
+
+function clearPhosphor() {
+    if (!phosCtx) return;
+    phosPts.length = 0;
+    phosCtx.setTransform(1, 0, 0, 1, 0, 0);
+    phosCtx.clearRect(0, 0, $('phosphor').width, $('phosphor').height);
+    phosCtx.setTransform(phosDpr, 0, 0, phosDpr, 0, 0);
+}
+
+/* 单个点的亮度曲线：线性剩余寿命再取 1.4 次幂，尾部收得更快（不拖泥带水） */
+const phosAlpha = ageFrac => Math.pow(1 - ageFrac, 1.4);
+
+function phosFrame(now) {
+    phosRaf = 0;
+    if (!phosCtx || !audioAxis()) return;
+    const t = now || performance.now();
+
+    /* 丢过期点：这就是「2 秒消散」的唯一依据 */
+    let cut = 0;
+    while (cut < phosPts.length && t - phosPts[cut].t > PHOS_LIFE) cut++;
+    if (cut) phosPts.splice(0, cut);
+
+    phosCtx.clearRect(0, 0, SCOPE, SCOPE);
+    if (!phosPts.length) { phosRaf = requestAnimationFrame(phosFrame); return; }
+
+    /* 1. 连线：只连相邻且够短的采样，透明度同样按寿命衰减 */
+    phosCtx.globalCompositeOperation = 'lighter';
+    phosCtx.lineWidth = 0.9;
+    phosCtx.lineCap = 'round';
+    for (let i = 1; i < phosPts.length; i++) {
+        const a = phosPts[i - 1], b = phosPts[i];
+        const d = Math.hypot(b.x - a.x, b.y - a.y);
+        if (d > PHOS_LINK) continue;
+        const age = (t - b.t) / PHOS_LIFE;
+        if (age >= 1) continue;
+        const alpha = phosAlpha(age) * 0.26 * (1 - d / PHOS_LINK);
+        if (alpha < 0.004) continue;
+        phosCtx.strokeStyle = 'rgba(150,108,255,' + alpha.toFixed(3) + ')';
+        phosCtx.beginPath();
+        phosCtx.moveTo(a.x, a.y);
+        phosCtx.lineTo(b.x, b.y);
+        phosCtx.stroke();
+    }
+
+    /* 2. 光斑：寿命越短越暗，光斑也略缩 */
+    const sp = phosSprite;
+    for (let i = 0; i < phosPts.length; i++) {
+        const p = phosPts[i];
+        const age = (t - p.t) / PHOS_LIFE;
+        if (age >= 1) continue;
+        const a = phosAlpha(age);
+        if (a < 0.01) continue;
+        const size = 5.6 + a * 3.0;                 /* 屏幕光斑约 3~4.5 px */
+        phosCtx.globalAlpha = a * 0.60;
+        phosCtx.drawImage(sp.canvas, p.x - size / 2, p.y - size / 2, size, size);
+    }
+    phosCtx.globalAlpha = 1;
+    phosCtx.globalCompositeOperation = 'source-over';
+
+    phosRaf = requestAnimationFrame(phosFrame);
+}
+
+function ensurePhosLoop() {
+    if (!phosRaf) phosRaf = requestAnimationFrame(phosFrame);
+}
+
+/* x / y 是两条独立消息：必须等两路都到齐才画一个点，
+   否则每半个点都会用「新 x + 旧 y」画一次，轨迹上全是散点。 */
+let haveX = false, haveY = false;
+
+function tryPlotPair() {
+    if (!haveX || !haveY) return;
+    haveX = false;
+    haveY = false;
+    placeBeam(lisX * SCOPE, (1 - lisY) * SCOPE);
+    pushPhos();
+}
+
+function pushPhos() {
+    phosPts.push({
+        x: clamp(lisX, 0, 1) * SCOPE,
+        y: (1 - clamp(lisY, 0, 1)) * SCOPE,
+        t: performance.now()
+    });
+    if (phosPts.length > PHOS_MAXPTS) phosPts.shift();
+    ensurePhosLoop();
+}
+
+/* 网格：10 × 10，中心十字用虚线强调 */
+function buildGrid() {
+    const g = $('grid');
+    g.innerHTML = '';
+    for (let i = 1; i < 10; i++) {
+        const p = i * 20;
+        const cls = i === 5 ? 'grid major' : 'grid';
+        for (const [x1, y1, x2, y2] of [[p, 0, p, SCOPE], [0, p, SCOPE, p]]) {
+            const line = document.createElementNS(NS, 'line');
+            line.setAttribute('x1', x1); line.setAttribute('y1', y1);
+            line.setAttribute('x2', x2); line.setAttribute('y2', y2);
+            line.setAttribute('class', cls);
+            g.appendChild(line);
+        }
+    }
+}
+
+/* ---------------- 源 / 波形选择 ---------------- */
+function paintSegments() {
+const map = { segX: xsrc, segY: ysrc, segW: wave };
+for (const id in map) {
+    for (const b of $(id).querySelectorAll('button')) {
+        b.classList.toggle('on', +b.dataset.v === map[id]);
+    }
+    /* 输入轴的选项在合成轴下没有意义，直接压暗提示 */
+}
+$('segW').classList.toggle('off', audioAxis());
+}
+
+function setSource(axis, v) {
+const n = clamp(Math.round(v), 0, 3);
+if (axis === 'x') { if (n === xsrc) return; xsrc = n; }
+else { if (n === ysrc) return; ysrc = n; }
+paintSegments();
+paintFigure();
+}
+
+function setWave(v) {
+const n = clamp(Math.round(v), 0, 3);
+if (n === wave) return;
+wave = n;
+paintSegments();
+paintFigure();
+}
+
+function bindSeg(id, channel, setter) {
+const el = $(id);
+el.addEventListener('pointerdown', e => e.stopPropagation());
+el.addEventListener('click', e => {
+    const b = e.target.closest('button');
+    if (!b) return;
+    const v = +b.dataset.v;
+    setter(v);
+    Cabbage.sendControlData({ channel: channel, value: v, gesture: 'complete' }, null);
+});
+}
+
+/* ---------------- 混响发送 ---------------- */
+const wetEditing = { key: null };
+
+function paintWet() {
+    const w = $('dual').clientWidth;
+    const l = minWet * w, r = maxWet * w;
+    $('wetRange').style.left = l + 'px';
+    $('wetRange').style.width = Math.max(0, r - l) + 'px';
+    $('thumbMin').style.left = l + 'px';
+    $('thumbMax').style.left = r + 'px';
+    if (wetEditing.key !== 'minWet') $('wetMinOut').value = minWet.toFixed(2);
+    if (wetEditing.key !== 'maxWet') $('wetMaxOut').value = maxWet.toFixed(2);
+}
+
+const wetFrom = e => {
+    const box = $('dual').getBoundingClientRect();
+    const f = clamp((e.clientX - box.left) / box.width, 0, 1);
+    if (dragOn.wet === 'min') minWet = Math.min(f, maxWet - 0.02);
+    else maxWet = Math.max(f, minWet + 0.02);
+    paintWet();
+    return dragOn.wet === 'min' ? minWet : maxWet;
+};
+
+function bindThumb(id, which) {
+    const el = $(id);
+    const ch = which === 'min' ? 'minWet' : 'maxWet';
+    el.addEventListener('pointerdown', e => {
+        dragOn.wet = which;
+        el.setPointerCapture(e.pointerId);
+        e.preventDefault();
+        beginDrag();
+        Cabbage.sendControlData({ channel: ch, value: wetFrom(e), gesture: 'begin' }, null);
+    });
+    el.addEventListener('pointermove', e => {
+        if (dragOn.wet !== which) return;
+        e.preventDefault();
+        Cabbage.sendControlData({ channel: ch, value: wetFrom(e), gesture: 'value' }, null);
+    });
+    const up = () => {
+        if (dragOn.wet !== which) return;
+        dragOn.wet = null;
+        endDrag();
+        Cabbage.sendControlData({ channel: ch, value: which === 'min' ? minWet : maxWet, gesture: 'end' }, null);
+    };
+    el.addEventListener('pointerup', up);
+    el.addEventListener('pointercancel', up);
+}
+
+function bindWetField(id, key) {
+    const el = $(id);
+    const p = { min: 0, max: 1, step: 0.01 };
+    const commit = () => {
+        if (wetEditing.key !== key) return;
+        wetEditing.key = null;
+        const v = parseNum(el.value, p);
+        if (!isFinite(v)) { paintWet(); return; }
+        if (key === 'minWet') minWet = clamp(v, 0, Math.max(0, maxWet - 0.02));
+        else maxWet = clamp(v, Math.min(1, minWet + 0.02), 1);
+        paintWet();
+        Cabbage.sendControlData({ channel: key, value: key === 'minWet' ? minWet : maxWet, gesture: 'complete' }, null);
+    };
+    el.addEventListener('focus', () => { wetEditing.key = key; el.select(); });
+    el.addEventListener('keydown', e => {
+        e.stopPropagation();
+        if (e.key === 'Enter') { e.preventDefault(); commit(); el.blur(); }
+        else if (e.key === 'Escape') { e.preventDefault(); wetEditing.key = null; paintWet(); el.blur(); }
+    });
+    el.addEventListener('blur', commit);
+    el.addEventListener('pointerdown', e => e.stopPropagation());
+    el.addEventListener('dblclick', e => {
+        e.preventDefault();
+        wetEditing.key = null;
+        if (key === 'minWet') minWet = WET_DEF.minWet; else maxWet = WET_DEF.maxWet;
+        paintWet();
+        el.blur();
+        Cabbage.sendControlData({ channel: key, value: key === 'minWet' ? minWet : maxWet, gesture: 'complete' }, null);
+    });
+}
+
+/* ---------------- 电平 ---------------- */
+/* Csound 送来的是线性幅度（0dbfs=1 → 0..1），
+   表柱按 dB 显示：0 dB 在顶，-60 dB 在底（与全系列同一套）。 */
+const METER_H = 78;                        // 必须与 .bar / .dbscale 的 CSS 高度一致
+const DB_MIN = -60;
+/* 刻度往 0 dB 挤：等响感知下高端要密、低端要疏 */
+const DB_TICKS = [0, -6, -12, -18, -24, -30, -40, -50, -60];
+
+const ampToDb = a => 20 * Math.log10(Math.max(Math.abs(a), 1e-6));
+const dbToPos = db => clamp((db - DB_MIN) / (0 - DB_MIN), 0, 1);
+
+function buildDbScales() {
+    for (const id of ['scaleFL', 'scaleFR', 'scaleRL', 'scaleRR']) {
+        const el = $(id);
+        if (!el) continue;
+        el.innerHTML = '';
+        for (const db of DB_TICKS) {
+            const t = document.createElement('div');
+            t.className = 't' + (db === 0 ? ' zero' : '') + (db % 12 === 0 ? ' major' : '');
+            t.style.bottom = (dbToPos(db) * 100).toFixed(3) + '%';
+            const n = document.createElement('span');
+            n.className = 'n';
+            n.textContent = db === 0 ? '0' : String(db);
+            t.appendChild(n);
+            el.appendChild(t);
+        }
+    }
+}
+
+function setMeter(id, capId, amp) {
+    const db = clamp(ampToDb(amp), DB_MIN, 0);
+    const pos = dbToPos(db);
+    $(id).style.transform = 'scaleY(' + pos.toFixed(4) + ')';
+    const cap = $(capId);
+    cap.style.transform = 'translateY(' + (-pos * METER_H).toFixed(1) + 'px)';
+    cap.style.opacity = pos > 0.002 ? '.95' : '0';
+    return amp;
+}
+function updateGlow() {
+    const lv = Math.max(lvlFL, lvlFR, lvlRL, lvlRR);
+    document.documentElement.style.setProperty('--lvl', lv.toFixed(3));
+}
+
+/* ---------------- 接收后端 ---------------- */
+function applyValue(id, v) {
+    if (typeof v !== 'number' || isNaN(v)) return;
+    switch (id) {
+        case 'lis_p':
+            phaseU = ((v % FIG_DEN) + FIG_DEN) % FIG_DEN;
+            if (!audioAxis()) scheduleMotion();
+            break;
+        case 'lis_x':
+            lisX = clamp(v, 0, 1);
+            if (audioAxis()) { haveX = true; tryPlotPair(); }
+            break;
+        case 'lis_y':
+            lisY = clamp(v, 0, 1);
+            if (audioAxis()) { haveY = true; tryPlotPair(); }
+            break;
+        case 'rate':     if (!dragOn.rate)     { rate = clamp(v, P.rate.min, P.rate.max); paintKnob('rate'); } break;
+        /* ratio 落到 1/8 格子上：与 DSP 的 kRatioQ 保持同一个值 */
+        case 'ratio':    if (!dragOn.ratio)    { ratio = clamp(Math.round(v * 8) / 8, P.ratio.min, P.ratio.max); paintKnob('ratio'); paintFigure(); } break;
+        case 'phase':    if (!dragOn.phase)    { phase = clamp(v, P.phase.min, P.phase.max); paintKnob('phase'); paintFigure(); } break;
+        case 'scale':    if (!dragOn.scale)    { scaleV = clamp(v, P.scale.min, P.scale.max); paintKnob('scale'); paintFigure(); } break;
+        case 'chaos':    if (!dragOn.chaos)    { chaos = clamp(v, P.chaos.min, P.chaos.max); paintKnob('chaos'); } break;
+        case 'glide':    if (!dragOn.glide)    { glide = clamp(v, P.glide.min, P.glide.max); paintKnob('glide'); } break;
+        case 'inGain':   if (!dragOn.inGain)   { inGain = clamp(v, P.inGain.min, P.inGain.max); paintKnob('inGain'); } break;
+        case 'xsrc':     setSource('x', v); break;
+        case 'ysrc':     setSource('y', v); break;
+        case 'wave':     setWave(v); break;
+        case 'roomSize': if (!dragOn.roomSize) { room = clamp(v, P.roomSize.min, P.roomSize.max); paintKnob('roomSize'); } break;
+        case 'cutoff':   if (!dragOn.cutoff)   { cut = clamp(v, P.cutoff.min, P.cutoff.max); paintKnob('cutoff'); } break;
+        case 'masterGain': if (!dragOn.masterGain) { gain = clamp(v, P.masterGain.min, P.masterGain.max); paintKnob('masterGain'); } break;
+        case 'minWet':   if (dragOn.wet !== 'min') { minWet = clamp(v, 0, 1); paintWet(); } break;
+        case 'maxWet':   if (dragOn.wet !== 'max') { maxWet = clamp(v, 0, 1); paintWet(); } break;
+        case 'outFL':
+            lvlFL = setMeter('mtrFL', 'capFL', v);
+            updateGlow();
+            break;
+        case 'outFR':
+            lvlFR = setMeter('mtrFR', 'capFR', v);
+            updateGlow();
+            break;
+        case 'outRL':
+            lvlRL = setMeter('mtrRL', 'capRL', v);
+            updateGlow();
+            break;
+        case 'outRR':
+            lvlRR = setMeter('mtrRR', 'capRR', v);
+            updateGlow();
+            break;
+
+    }
+}
+
+Cabbage.addMessageListener(msg => {
+    const data = msg.data ?? msg;
+    if (msg.command === 'widgetUpdate') {
+        const id = data.id ?? data.channel;
+        const v = data.value !== undefined ? data.value : Cabbage.extractValue(data, id);
+        applyValue(id, v);
+    } else if (msg.command === 'batchWidgetUpdate') {
+        for (const w of msg.widgets ?? []) {
+            const e = w.data ?? w;
+            applyValue(e.id, Cabbage.extractValue(e, e.id));
+        }
+    } else if (msg.command === 'resizeResponse') {
+        if (hostResize !== 'accepted') {
+            const d = msg.data ?? msg;
+            hostResize = d.accepted ? 'accepted' : 'rejected';
+            if (hostResize === 'accepted') { reqViewport = 0; clearTimeout(reqTimer); }
+            paintZoomBadge();
+        }
+    } else if (msg.command === 'parameterChange') {
+        const pm = msg.data ?? msg;
+        const id = typeof pm.channel === 'string' ? pm.channel : PARAM_IDX[pm.paramIdx];
+        if (id) applyValue(id, pm.value);
+    }
+});
+
+/* ---------------- 窗口缩放 ----------------
+   1. 向宿主请求改变窗口尺寸（Cabbage.requestResize）
+   2. 画布按实际视口自适应，宿主不配合时也填满可用空间
+   拖动右下角三角：往下拖变大、往上拖变小，双击回 100%。 */
+const CANVAS = { w: 380, h: 684 };
+/* 默认呈现比例 = 宿主窗口 / 设计稿。改这一个数就是改插件默认尺寸：
+   前端布局始终按 380×684 的设计单位写，缩放机制负责整体放大，不用逐条改 CSS。
+   ★ 现在是原来的 70%（4/3 × 0.7 ≈ 0.9333）：宿主窗口从 507×912 收到 355×639，
+     原尺寸在多数宿主的插件窗口里会超出可用高度被裁掉。
+     必须与 CSD 的 form.size 严格同比例：355 / 380 = 639 / 684。 */
+const BASE = 355 / 380;
+const MIN_SCALE = 0.75 * BASE;          // 下限仍是「默认尺寸的 75%」
+const MAX_FILL = 0.94;
+const screenW = () => (screen.availWidth || screen.width || 0);
+const screenH = () => (screen.availHeight || screen.height || 0);
+
+function maxScale() {
+    const sw = screenW(), sh = screenH();
+    const byW = sw ? sw / CANVAS.w : 3;
+    const byH = sh ? sh / CANVAS.h : 3;
+    /* 不能给下限兜底，否则小屏上兜底值会突破高度上限 */
+    return Math.max(MIN_SCALE, Math.min(12, Math.min(byW, byH) * MAX_FILL));
+}
+
+const viewScale = () => Math.min(innerWidth / CANVAS.w, innerHeight / CANVAS.h);
+/* 必须用屏幕绝对坐标：clientY 相对窗口，宿主 resize 时窗口移动会让它漂移并反馈成反向 */
+const yOf = e => (typeof e.screenY === 'number' && e.screenY !== 0) ? e.screenY : e.clientY;
+
+let hostResize = 'unknown', reqViewport = 0, reqTimer = 0;
+let zoomDrag = null, holdScale = null;
+let pendingScale = null, rafId = 0, lastSent = 0, dragEndedAt = 0;
+
+function paintZoomBadge(override) {
+    const s = override != null ? override : viewScale();
+    /* 无条件写 --zoom：拖动时画布要「领先」窗口，否则先露白边 */
+    document.body.style.setProperty('--zoom', s.toFixed(4));
+    $('zpct').textContent = Math.round(s / BASE * 100) + '%';   /* 相对默认尺寸 */
+    $('zoomer').dataset.host = hostResize;
+}
+
+function fitToViewport() {
+    paintWet();          /* 视口变了，双滑块是 px 定位，必须按新宽度重排 */
+    if (reqViewport && (innerWidth !== reqViewport.w || innerHeight !== reqViewport.h)) {
+        reqViewport = 0; clearTimeout(reqTimer); hostResize = 'accepted';
+    }
+    if (holdScale != null && Math.abs(viewScale() - holdScale) < 0.01) holdScale = null;
+    paintZoomBadge(zoomDrag && zoomDrag.moved ? zoomDrag.target : (holdScale ?? undefined));
+}
+
+function requestWindowScale(sc) {
+    let w = Math.round(CANVAS.w * sc);
+    let h = Math.round(CANVAS.h * sc);
+    const limit = Math.floor(screenH() * MAX_FILL);
+    if (limit > 0 && h > limit) { h = limit; w = Math.round(h * CANVAS.w / CANVAS.h); }
+    reqViewport = { w: innerWidth, h: innerHeight };
+    clearTimeout(reqTimer);
+    reqTimer = setTimeout(() => {
+        if (reqViewport) { reqViewport = 0; hostResize = 'rejected'; holdScale = null; paintZoomBadge(); }
+    }, 600);
+    Cabbage.requestResize(w, h, null);
+}
+
+function scheduleResizeRequest() {
+    if (rafId) return;
+    rafId = requestAnimationFrame(() => {
+        rafId = 0;
+        if (pendingScale == null) return;
+        if (lastSent && Math.abs(pendingScale - lastSent) < 0.004) return;
+        lastSent = pendingScale;
+        requestWindowScale(lastSent);
+    });
+}
+
+$('zoomer').addEventListener('pointerdown', e => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    $('zoomer').setPointerCapture(e.pointerId);
+    const s = viewScale();
+    /* ceiling 不能低于当前比例，否则「往下拖想变大」第一帧反而缩一下 */
+    zoomDrag = { anchorY: yOf(e), startScale: s, moved: false, target: s,
+                 ceiling: Math.max(s, maxScale()) };
+    dragOn.zoom = true;
+    document.body.classList.add('dragging-zoom');
+});
+
+$('zoomer').addEventListener('pointermove', e => {
+    if (!zoomDrag) return;
+    /* 拖的是右下角：往下 = 拉角出去 = 变大 */
+    const dy = yOf(e) - zoomDrag.anchorY;
+    if (!zoomDrag.moved && Math.abs(dy) < 2) return;
+    zoomDrag.moved = true;
+    e.preventDefault();
+    const raw = zoomDrag.startScale * Math.exp(dy / 220);
+    const target = Math.min(zoomDrag.ceiling, Math.max(MIN_SCALE, raw));
+    zoomDrag.target = target;
+    pendingScale = target;
+    paintZoomBadge(target);
+    scheduleResizeRequest();
+});
+
+function endZoomDrag(e) {
+    if (!zoomDrag) return;
+    const moved = zoomDrag.moved;
+    const finalScale = zoomDrag.target;
+    zoomDrag = null;
+    pendingScale = null;
+    dragOn.zoom = false;
+    document.body.classList.remove('dragging-zoom');
+    if (rafId) { cancelAnimationFrame(rafId); rafId = 0; }
+    try { $('zoomer').releasePointerCapture(e.pointerId); } catch (_) {}
+    if (moved) {
+        dragEndedAt = performance.now();
+        /* rAF 可能还没轮到，松手必须补发最终值 */
+        if (Math.abs(finalScale - lastSent) >= 0.004) {
+            lastSent = finalScale;
+            requestWindowScale(finalScale);
+        }
+        holdScale = finalScale;
+        paintZoomBadge(finalScale);
+        return;
+    }
+    paintZoomBadge();
+}
+$('zoomer').addEventListener('pointerup', endZoomDrag);
+$('zoomer').addEventListener('pointercancel', endZoomDrag);
+
+/* 双击回 100%（= BASE，即默认尺寸）；刚拖完 400ms 内忽略 */
+$('zoomer').addEventListener('dblclick', e => {
+    e.preventDefault();
+    if (performance.now() - dragEndedAt < 400) return;
+    lastSent = BASE;
+    holdScale = BASE;
+    requestWindowScale(BASE);
+    paintZoomBadge(BASE);
+});
+
+function initZoom() {
+    paintZoomBadge();
+    lastSent = viewScale();
+    new ResizeObserver(fitToViewport).observe(document.documentElement);
+    addEventListener('resize', fitToViewport);
+}
+
+/* ---------------- 启动 ---------------- */
+buildTicks('tRate');
+buildTicks('tRatio');
+buildTicks('tPhase');
+buildTicks('tScale');
+buildTicks('tChaos');
+buildTicks('tGlide');
+buildTicks('tInGain');
+buildTicks('tRoom');
+buildTicks('tCut');
+buildTicks('tGain');
+
+for (const g of ['gRate', 'gRatio', 'gPhase', 'gScale', 'gChaos', 'gGlide', 'gInGain', 'gRoom', 'gCut', 'gGain']) {
+    $(g).setAttribute('stroke-dasharray', SPAN.toFixed(2) + ' ' + CIRC.toFixed(2));
+}
+
+bindKnob('kRate', 'rate');
+bindKnob('kRatio', 'ratio');
+bindKnob('kPhase', 'phase');
+bindKnob('kScale', 'scale');
+bindKnob('kChaos', 'chaos');
+bindKnob('kGlide', 'glide');
+bindKnob('kInGain', 'inGain');
+bindKnob('kRoom', 'roomSize');
+bindKnob('kCut', 'cutoff');
+bindKnob('kGain', 'masterGain');
+
+bindSeg('segX', 'xsrc', v => setSource('x', v));
+bindSeg('segY', 'ysrc', v => setSource('y', v));
+bindSeg('segW', 'wave', v => setWave(v));
+
+bindThumb('thumbMin', 'min');
+bindThumb('thumbMax', 'max');
+bindWetField('wetMinOut', 'minWet');
+bindWetField('wetMaxOut', 'maxWet');
+
+initZoom();
+
+buildGrid();
+buildTrail();
+initPhosphor();
+paintFigure();
+paintWet();
+for (const k of Object.keys(P)) paintKnob(k);
+
+buildDbScales();
+setMeter('mtrFL', 'capFL', 0);
+setMeter('mtrFR', 'capFR', 0);
+setMeter('mtrRL', 'capRL', 0);
+setMeter('mtrRR', 'capRR', 0);
+
+Cabbage.sendCustomCommand('cabbageIsReadyToLoad', null);
+/* ---------------- 内置使用手册 ----------------
+   顶栏 ? 在 iframe 里打开 help.html。只用内嵌：WebView 里 window.open 是死按钮。 */
+import('./help-ui.js').then(({ attachHelp }) => attachHelp())
+    .catch(e => console.warn('Cabbage: 手册模块不可用 —', e));
+</script>
+</body>
+</html>

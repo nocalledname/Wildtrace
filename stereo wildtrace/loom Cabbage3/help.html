@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Cab3-Depth-Loom · 使用手册</title>
+<style>:root {
+    --fg: #f3f3f3;
+    --dim: rgba(255, 255, 255, .70);
+    --faint: rgba(255, 255, 255, .42);
+    --hair: rgba(255, 255, 255, .12);
+    --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body {
+    background: #000;
+    color: var(--fg);
+    font-family: -apple-system, "Helvetica Neue", "PingFang SC", Arial, sans-serif;
+    font-size: 11px;
+    line-height: 1.68;
+    -webkit-font-smoothing: antialiased;
+}
+body { padding: 16px 14px 38px; max-width: 760px; margin: 0 auto; }
+::-webkit-scrollbar { width: 4px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, .16); border-radius: 2px; }
+::-webkit-scrollbar-thumb:hover { background: rgba(255, 255, 255, .32); }
+
+h1 {
+    font-size: 13px;
+    font-weight: 500;
+    letter-spacing: .26em;
+    text-transform: uppercase;
+}
+.sub {
+    margin-top: 4px;
+    font-family: var(--mono);
+    font-size: 8.5px;
+    letter-spacing: .16em;
+    text-transform: uppercase;
+    color: var(--faint);
+}
+h2 {
+    margin: 20px 0 6px;
+    font-size: 9px;
+    font-weight: 500;
+    letter-spacing: .22em;
+    text-transform: uppercase;
+    color: rgba(255, 255, 255, .55);
+    padding-bottom: 4px;
+    border-bottom: 1px solid var(--hair);
+}
+h3 {
+    margin: 13px 0 2px;
+    font-family: var(--mono);
+    font-size: 8.5px;
+    font-weight: 500;
+    letter-spacing: .16em;
+    text-transform: uppercase;
+    color: rgba(255, 255, 255, .38);
+}
+h3:first-of-type { margin-top: 6px; }
+
+ul { padding-left: 15px; }
+li { color: var(--dim); margin: 1px 0; }
+li b { color: #fff; font-weight: 500; }
+
+table { width: 100%; border-collapse: collapse; }
+td {
+    padding: 3px 0;
+    vertical-align: top;
+    color: var(--dim);
+    font-size: 10.5px;
+}
+td:first-child {
+    width: 96px;
+    padding-right: 10px;
+    font-family: var(--mono);
+    font-size: 8.5px;
+    letter-spacing: .04em;
+    color: rgba(255, 255, 255, .88);
+    white-space: nowrap;
+}
+
+.k { padding: 7px 0 8px; border-bottom: 1px solid rgba(255, 255, 255, .065); }
+.k:last-child { border-bottom: 0; }
+.k .head { display: flex; align-items: baseline; gap: 8px; }
+.k .name { font-size: 10.5px; font-weight: 600; letter-spacing: .01em; }
+.k .ch {
+    font-family: var(--mono);
+    font-size: 8.5px;
+    letter-spacing: .02em;
+    color: rgba(255, 255, 255, .34);
+}
+.k .range {
+    margin-left: auto;
+    font-family: var(--mono);
+    font-size: 8.5px;
+    letter-spacing: .02em;
+    color: rgba(255, 255, 255, .44);
+    text-align: right;
+    white-space: nowrap;
+}
+.k .desc { margin-top: 2px; color: var(--dim); font-size: 10.5px; line-height: 1.62; }
+.k .desc code {
+    font-family: var(--mono);
+    font-size: 9.5px;
+    color: rgba(255, 255, 255, .90);
+}
+
+.note {
+    margin-top: 8px;
+    padding: 8px 10px;
+    border-left: 2px solid rgba(255, 255, 255, .20);
+    background: rgba(255, 255, 255, .035);
+    color: rgba(255, 255, 255, .68);
+    font-size: 10px;
+    line-height: 1.66;
+}
+.note b { color: #fff; font-weight: 600; }</style>
+</head>
+<body>
+<h1>LOOM</h1>
+<div class="sub">Depth Render · Cab3-Depth-Loom</div>
+
+<h2>快速上手</h2>
+<table>
+<tr><td>无需摆位</td><td>位置由插件自己走（轨迹是算法生成的），没有可拖拽的点；你调的是「它怎么走」。</td></tr>
+<tr><td>数值框</td><td>点击进入编辑，<code>Enter</code> 提交、<code>Esc</code> 取消。双击数值框回默认值。</td></tr>
+<tr><td>旋钮 / 推子</td><td>旋钮上下拖；横向推子左右拖、纵向推子上下拖。按住 <code>Shift</code> 精调。双击回默认值。</td></tr>
+<tr><td>Wet Send</td><td>两个滑柄分别拖混响发送的下限 / 上限，不能交叉。</td></tr>
+<tr><td>右下角三角</td><td>拖动改窗口大小，双击回到 100%。</td></tr>
+<tr><td>顶栏 ?</td><td>打开本手册。</td></tr>
+</table>
+
+<h2>旋钮与推子</h2>
+<h3>Matrix</h3>
+<div class="k"><div class="head"><span class="name">Rows</span><span class="ch">rows</span><span class="range">1 – 10 · 默认 4</span></div><div class="desc">织机的纬线数（纵向节点数）。</div></div>
+<div class="k"><div class="head"><span class="name">Cols</span><span class="ch">cols</span><span class="range">1 – 10 · 默认 4</span></div><div class="desc">织机的经线数（横向节点数）。</div></div>
+<div class="k"><div class="head"><span class="name">Path</span><span class="ch">path</span><span class="range">1 – 8 · 默认 1</span></div><div class="desc">8 条蛇形扫描路径：<code>1–4</code> 水平优先、<code>5–8</code> 垂直优先；同一组里依次是四个角作为起点。奇数行会自动折返，所以是「S」形而不是回到头。</div></div>
+<div class="k"><div class="head"><span class="name">Speed</span><span class="ch">speed</span><span class="range">0.1 – 10 · 默认 0.20</span></div><div class="desc">走完整个矩阵的速度（Hz）。</div></div>
+<h3>Shuttle</h3>
+<div class="k"><div class="head"><span class="name">Glide</span><span class="ch">glide</span><span class="range">0.001 – 0.15 s · 默认 0.030</span></div><div class="desc">梭子在节点之间的插值时间。越大越像被线拉着滑过去，越小越像逐点跳。</div></div>
+<div class="k"><div class="head"><span class="name">Texture</span><span class="ch">texture</span><span class="range">0 – 1 · 默认 0.600</span></div><div class="desc">格间的张力包络深度。振幅 = <code>Texture + (1−Texture)·sin(π·格内相位)</code>：<code>1</code> = 恒定；<code>0</code> = <b>到节点时凹到静音、格间最响</b>，颗粒感最碎。</div></div>
+<div class="k"><div class="head"><span class="name">Warp:ms</span><span class="ch">warp</span><span class="range">0 – 100 · 默认 5</span></div><div class="desc">延迟调制量（ms）。延迟 = <code>10 + (X + Y) × Warp</code>，所以梭子在格子上移动时，延迟变化会被听成一次 <b>音高滑动</b>：越往右上滑得越高、越往左下越低。<code>100</code> 时摆幅约 ±半八度，已经是很明显的“织机被拉扯”的音高起伏；<code>0</code> 关闭。变化速度由 <b>Glide</b> 决定 —— Glide 越小，滑得越急。</div></div>
+<h3>Room</h3>
+<div class="k"><div class="head"><span class="name">Room</span><span class="ch">roomSize</span><span class="range">10 – 100 · 默认 50</span></div><div class="desc">空间尺寸。延迟基准 = <code>0.1 ms + 距离 × Room</code>，混响反馈 = <code>0.10 + (Room−10)/90 × 0.80</code>（10 → 0.10，100 → 0.90）。越大越空旷、尾巴越长。</div></div>
+<div class="k"><div class="head"><span class="name">Damp</span><span class="ch">cutoff</span><span class="range">1000 – 16000 · 默认 16000</span></div><div class="desc">混响的高频吸收。越低尾巴越暗。</div></div>
+<div class="k"><div class="head"><span class="name">Master Gain</span><span class="ch">masterGain</span><span class="range">0 – 8 · 默认 2.00</span></div><div class="desc">总输出增益。</div></div>
+<div class="k"><div class="head"><span class="name">Wet Send Min / Max</span><span class="ch">minWet / maxWet</span><span class="range">0 – 1 · 默认 0.10 / 0.30</span></div><div class="desc">最近处 / 最远处的混响发送量，中间按深度线性插值。<b>发送量还会再乘一次距离衰减</b>，所以远端混响跟着干声一起变小，不会越远越糊。</div></div>
+
+
+<div class="note"><b>Depth 渲染：</b>输出左右两路立体声。距离从<b>底边中央</b>起算：pad 底部最近、顶部最远。</div>
+
+<div class="note"><b>音量与混响的安全余量：</b>本插件的信号链内部留了 6 dB 余量（干声与混响发送各减半），末端还有一道软膝限幅（0.85 以下完全线性）。但把 <b>Master Gain</b> 推到很高、同时把 <b>Wet Send Max</b> 也拉满时，仍可能顶到限幅器的压缩区 —— 听感上是轻微的「滋滋」或发毛。遇到这种情况，先把 Master 退回 4–6，再用 Wet Send 补混响量，不要两边同时拉满。</div>
+</body>
+</html>

@@ -1,0 +1,1971 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Cab3-Ambi-SwarmGrain</title>
+<style>
+    :root {
+        --bg: #0a0a0a;
+        --red: #ff2037;
+        --grey: #f2f2f2;
+        --mono: "SF Mono", ui-monospace, "JetBrains Mono", Menlo, Consolas, monospace;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    html, body {
+        width: 100%;
+        height: 100%;
+        overflow: hidden;
+        background: var(--bg);
+    }
+
+    body {
+        --zoom: 1;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        position: relative;
+    }
+
+    .canvas {
+        width: 620px;
+        height: 820px;
+        flex: none;
+        transform: scale(var(--zoom));
+        transform-origin: center center;
+        position: relative;
+        overflow: hidden;
+        color: var(--grey);
+        font-family: -apple-system, "Helvetica Neue", "PingFang SC", Arial, sans-serif;
+        font-size: 10px;
+        user-select: none;
+        -webkit-user-select: none;
+        -webkit-touch-callout: none;
+        background:
+            radial-gradient(ellipse 86% 52% at 50% 20%, #171112 0%, #0d0b0b 58%, #080707 100%);
+    }
+
+    /* ================= 场景 ================= */
+    #scene {
+        position: absolute;
+        left: 0; top: 0;
+        width: 620px; height: 480px;
+        display: block;
+    }
+
+    .hdr {
+        position: absolute;
+        left: 20px; right: 18px; top: 13px;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        pointer-events: none;
+        z-index: 4;
+    }
+    .hdr .mark { display: block; width: 13px; height: 13px; flex: none; }
+    .hdr .mark .ring { fill: none; stroke: rgba(255, 32, 55, .68); stroke-width: 1; }
+    .hdr .mark .core { fill: var(--red); }
+    .hdr h1 {
+        font-size: 13px;
+        font-weight: 600;
+        letter-spacing: .44em;
+        line-height: 1;
+        white-space: nowrap;
+    }
+    .hdr .sub {
+        font-family: var(--mono);
+        font-size: 7px;
+        letter-spacing: .22em;
+        text-transform: uppercase;
+        color: rgba(255, 90, 105, .95);
+        padding-top: 2px;
+        white-space: nowrap;
+    }
+    .hdr .tag {
+        margin-left: auto;
+        font-family: var(--mono);
+        font-size: 7px;
+        letter-spacing: .12em;
+        color: rgba(255, 255, 255, .92);
+        white-space: nowrap;
+    }
+
+    /* 场景里的 X / Y 推子（McCudy 风格：细轨 + 平头指针） */
+    .xy { position: absolute; z-index: 5; }
+    .xylab {
+        position: absolute;
+        font-family: var(--mono);
+        font-size: 6.5px;
+        letter-spacing: .16em;
+        color: rgba(255, 255, 255, .90);
+        text-transform: uppercase;
+        white-space: nowrap;
+    }
+    .xyval {
+        position: absolute;
+        font-family: var(--mono);
+        font-size: 6.5px;
+        color: #ffffff;
+        letter-spacing: .06em;
+    }
+    .xy.h { left: 105px; top: 44px; width: 330px; height: 16px; }
+    .xy.h .xylab { left: 0; top: -12px; }
+    .xy.h .xyval { right: 0; top: -12px; }
+    .xy.v { left: 64px; top: 76px; width: 18px; height: 330px; }
+    /* 竖推子的标签向左铺开（pad 左边有 64px 空档），避免压到画布 */
+    .xy.v .xylab { left: -50px; top: -13px; }
+    .xy.v .xyval { left: 0; bottom: -13px; }
+
+    .htrack {
+        position: absolute;
+        left: 0; right: 0; top: 50%;
+        height: 14px;
+        margin-top: -7px;
+        cursor: ew-resize;
+        touch-action: none;
+    }
+    .htrack::before {
+        content: "";
+        position: absolute;
+        left: 0; right: 0; top: 50%;
+        height: 2px;
+        margin-top: -1px;
+        background: rgba(200, 200, 200, .16);
+    }
+    .htrack::after {
+        content: "";
+        position: absolute;
+        left: 0; right: 0; top: 50%;
+        height: 8px;
+        margin-top: -4px;
+        background: repeating-linear-gradient(90deg,
+            rgba(200, 200, 200, .17) 0 1px, transparent 1px 10%);
+        pointer-events: none;
+    }
+
+    .vtrack {
+        position: absolute;
+        left: 50%; top: 0; bottom: 0;
+        width: 16px;
+        margin-left: -8px;
+        cursor: ns-resize;
+        touch-action: none;
+    }
+    .vtrack::before {
+        content: "";
+        position: absolute;
+        top: 0; bottom: 0; left: 50%;
+        width: 2px;
+        margin-left: -1px;
+        background: rgba(200, 200, 200, .16);
+    }
+    .vtrack::after {
+        content: "";
+        position: absolute;
+        top: 0; bottom: 0; left: 50%;
+        width: 8px;
+        margin-left: -4px;
+        background: repeating-linear-gradient(180deg,
+            rgba(200, 200, 200, .17) 0 1px, transparent 1px 10%);
+        pointer-events: none;
+    }
+
+    /* ================= 电平表 ================= */
+
+    .metercol {
+        position: absolute;
+        top: 108px;
+        display: flex;
+        flex-direction: column;
+        gap: 5px;
+        z-index: 4;
+        pointer-events: none;
+    }
+    .metercol.l { left: 470px; align-items: flex-start; }
+    .metercol.r { right: 18px; align-items: flex-end; }
+    .metercol > span {
+        height: 8px;
+        font-family: var(--mono);
+        font-size: 6.5px;
+        line-height: 8px;
+        letter-spacing: .18em;
+        color: rgba(255, 255, 255, .88);
+    }
+    .meterbody { display: flex; align-items: stretch; gap: 3px; }
+    .meterbody.mirror { flex-direction: row-reverse; }
+
+    .bar { position: relative; width: 9px; height: 116px; flex: none; }
+    .bar::before, .bar::after {
+        content: "";
+        position: absolute;
+        top: 0; bottom: 0;
+        width: 1px;
+        background: rgba(200, 200, 200, .12);
+    }
+    .bar::before { left: 0; }
+    .bar::after { right: 0; }
+    .bar i {
+        position: absolute;
+        left: 1px; right: 1px; bottom: 0;
+        height: 100%;
+        transform-origin: bottom center;
+        transform: scaleY(0);
+        background: linear-gradient(to top,
+            rgba(96, 16, 20, .92) 0%,
+            rgba(190, 34, 40, .84) 45%,
+            rgba(255, 68, 50, .92) 100%);
+        transition: transform .05s linear;
+        will-change: transform;
+    }
+    .bar b {
+        position: absolute;
+        left: 0; right: 0;
+        height: 1px;
+        bottom: 0;
+        background: rgba(255, 190, 180, .95);
+        transition: transform .05s linear, opacity .12s linear;
+        opacity: 0;
+        will-change: transform;
+    }
+
+    .dbscale { position: relative; width: 22px; height: 116px; flex: none; }
+    .dbscale .t { position: absolute; left: 0; right: 0; height: 0; }
+    .dbscale .t::before {
+        content: "";
+        position: absolute;
+        left: 0; top: 0;
+        width: 3px; height: 1px;
+        background: rgba(200, 200, 200, .26);
+    }
+    .dbscale .t.major::before { width: 5px; background: rgba(200, 200, 200, .50); }
+    .dbscale .t .n {
+        position: absolute;
+        right: 0; top: -3.4px;
+        font-family: var(--mono);
+        font-size: 6px; line-height: 1;
+        color: rgba(255, 255, 255, .62);
+    }
+    .dbscale .t.major .n { color: rgba(255, 255, 255, .88); }
+    .dbscale .t.zero .n { color: rgba(255, 220, 210, .90); }
+    .meterbody.mirror .dbscale .t::before { left: auto; right: 0; }
+    .meterbody.mirror .dbscale .t .n { right: auto; left: 0; }
+
+    /* ================= 控制台 ================= */
+    .deck {
+        position: absolute;
+        left: 0; right: 0; bottom: 0;
+        height: 340px;
+        padding: 10px 18px 8px;
+        display: flex;
+        flex-direction: column;
+        background:
+            linear-gradient(to bottom, rgba(10, 10, 10, 0) 0%, rgba(10, 10, 10, .84) 8%, #0d0c0c 34%),
+            #0d0c0c;
+        border-top: 1px solid rgba(255, 32, 55, .16);
+        z-index: 6;
+    }
+
+    .sec { flex: none; }
+    .sec + .sec { margin-top: 4px; }
+
+    .sh {
+        display: flex;
+        align-items: center;
+        gap: 7px;
+        height: 15px;
+        font-family: var(--mono);
+        font-size: 7px;
+        letter-spacing: .24em;
+        text-transform: uppercase;
+        color: rgba(255, 255, 255, .92);
+    }
+    .sh b { font-weight: 400; color: var(--red); letter-spacing: .06em; }
+    .sh::after {
+        content: "";
+        flex: 1;
+        height: 1px;
+        background: linear-gradient(to right, rgba(255, 32, 55, .30), rgba(255, 32, 55, .02));
+    }
+
+    .grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        column-gap: 22px;
+    }
+
+    /* ---- 一行推子：标签 · 轨 · 数值 ---- */
+    .frow {
+        display: flex;
+        align-items: center;
+        gap: 7px;
+        height: 23px;
+        min-width: 0;
+    }
+    .flab {
+        flex: none;
+        width: 84px;
+        font-family: var(--mono);
+        font-size: 6.5px;
+        line-height: 9px;
+        letter-spacing: .10em;
+        text-transform: uppercase;
+        color: #ffffff;
+        text-align: right;
+        white-space: nowrap;
+    }
+    .ftrack {
+        position: relative;
+        flex: 1;
+        min-width: 0;
+        height: 16px;
+        cursor: ew-resize;
+        touch-action: none;
+    }
+    .ftrack::before {
+        content: "";
+        position: absolute;
+        left: 0; right: 0; top: 50%;
+        height: 2px;
+        margin-top: -1px;
+        background: rgba(200, 200, 200, .16);
+    }
+    .ftrack::after {
+        content: "";
+        position: absolute;
+        left: 0; right: 0; top: 50%;
+        height: 8px;
+        margin-top: -4px;
+        background: repeating-linear-gradient(90deg,
+            rgba(200, 200, 200, .10) 0 1px, transparent 1px 20%);
+        pointer-events: none;
+    }
+    .ffill {
+        position: absolute;
+        left: 0; top: 50%;
+        height: 2px;
+        margin-top: -1px;
+        background: linear-gradient(to right, rgba(255, 32, 55, .45), rgba(255, 32, 55, .95));
+        pointer-events: none;
+    }
+    .fbar {
+        position: absolute;
+        top: 50%;
+        width: 3px;
+        height: 13px;
+        margin-top: -6.5px;
+        margin-left: -1.5px;
+        background: rgba(232, 232, 232, .95);
+        box-shadow: 0 0 6px rgba(255, 60, 60, .55);
+        pointer-events: none;
+    }
+    /* 竖推子：与横推子逐项对称（左右/上下、宽高互换），
+       漏了这两条规则时 .vbar 会退化成 0 高的空 div，看起来"Y 轴没有指针也没有填充" */
+    .vfill {
+        position: absolute;
+        left: 50%; bottom: 0;
+        width: 2px;
+        margin-left: -1px;
+        background: linear-gradient(to top, rgba(255, 32, 55, .45), rgba(255, 32, 55, .95));
+        pointer-events: none;
+    }
+    .vbar {
+        position: absolute;
+        left: 50%;
+        width: 13px;
+        height: 3px;
+        margin-left: -6.5px;
+        margin-top: -1.5px;
+        background: rgba(232, 232, 232, .95);
+        box-shadow: 0 0 6px rgba(255, 60, 60, .55);
+        pointer-events: none;
+    }
+    .fval {
+        flex: none;
+        width: 44px;
+        padding: 1px 2px;
+        border: 0;
+        border-radius: 2px;
+        background: transparent;
+        color: rgba(255, 255, 255, .95);
+        font-family: var(--mono);
+        font-size: 7.5px;
+        font-weight: 300;
+        letter-spacing: .02em;
+        text-align: right;
+        outline: none;
+        -webkit-user-select: text;
+        user-select: text;
+        -webkit-appearance: none;
+        appearance: none;
+    }
+    .fval:focus {
+        background: rgba(255, 32, 55, .14);
+        box-shadow: 0 0 0 1px rgba(255, 32, 55, .60);
+        color: #fff;
+    }
+
+    /* ---- 窗函数：竖排 5 档 + 形状预览（放在 pad 右侧、电平表下方）----
+       宽度只有 148px：横排 5 个标签必然被压缩，而且 584x26 的长条会把波形压扁。
+       竖排列表 + 148x46 的预览框（viewBox 与尺寸 1:1）不会有任何变形。 */
+    .winpanel {
+        position: absolute;
+        left: 458px;
+        top: 248px;
+        width: 148px;
+        z-index: 5;
+    }
+    .winpanel .sh { height: 14px; margin-bottom: 2px; }
+    .wlist { display: flex; flex-direction: column; gap: 1px; }
+    .wopt {
+        display: flex;
+        align-items: center;
+        gap: 5px;
+        height: 13px;
+        padding: 0 4px;
+        border: 0;
+        border-radius: 1px;
+        background: transparent;
+        color: rgba(255, 255, 255, .86);
+        font-family: var(--mono);
+        font-size: 6px;
+        letter-spacing: .10em;
+        text-transform: uppercase;
+        text-align: left;
+        cursor: pointer;
+        transition: color .14s ease, background .14s ease;
+        -webkit-appearance: none;
+        appearance: none;
+    }
+    .wopt i {
+        flex: none;
+        width: 2px;
+        height: 7px;
+        background: rgba(200, 200, 200, .18);
+        transition: background .14s ease, box-shadow .14s ease;
+    }
+    .wopt:hover { color: #fff; }
+    .wopt.on { color: #ffd9dc; background: rgba(255, 32, 55, .12); }
+    .wopt.on i { background: var(--red); box-shadow: 0 0 5px rgba(255, 32, 55, .85); }
+
+    .wprev {
+        margin-top: 5px;
+        width: 148px;
+        height: 46px;
+        border: 1px solid rgba(200, 200, 200, .12);
+        border-radius: 2px;
+        background: rgba(0, 0, 0, .55);
+        display: block;
+    }
+    .wprev .grid { stroke: rgba(200, 200, 200, .12); stroke-width: .7; }
+    .wprev .curve { fill: none; stroke: var(--red); stroke-width: 1.3; }
+
+    /* ---- 湿声双滑块 ---- */
+    .wetrow { margin-top: 1px; }
+    .wt {
+        display: flex;
+        justify-content: space-between;
+        align-items: baseline;
+        font-family: var(--mono);
+        font-size: 6.5px;
+        letter-spacing: .16em;
+        text-transform: uppercase;
+        color: rgba(255, 255, 255, .90);
+        margin-bottom: 2px;
+    }
+    .wt span:last-child { color: rgba(255, 255, 255, .74); letter-spacing: .10em; }
+
+    .dual { position: relative; width: 100%; height: 16px; }
+    .dual .ticks {
+        position: absolute;
+        left: 0; right: 0; top: 50%;
+        height: 7px;
+        margin-top: -3.5px;
+        background: repeating-linear-gradient(90deg,
+            rgba(200, 200, 200, .12) 0 1px, transparent 1px 10%);
+        pointer-events: none;
+    }
+    .dual .track {
+        position: absolute;
+        left: 0; right: 0; top: 50%;
+        height: 2px;
+        margin-top: -1px;
+        background: rgba(200, 200, 200, .18);
+    }
+    .dual .fill {
+        position: absolute;
+        top: 50%;
+        height: 2px;
+        margin-top: -1px;
+        background: var(--red);
+        box-shadow: 0 0 8px rgba(255, 32, 55, .5);
+    }
+    .dual .thumb {
+        position: absolute;
+        top: 50%;
+        width: 3px; height: 13px;
+        margin-top: -6.5px;
+        margin-left: -1.5px;
+        background: rgba(232, 232, 232, .95);
+        box-shadow: 0 0 6px rgba(255, 60, 60, .55);
+        cursor: ew-resize;
+        touch-action: none;
+    }
+    .dual .thumb:hover { background: #fff; }
+
+    .wetvals {
+        display: flex;
+        justify-content: space-between;
+        margin-top: 1px;
+        font-family: var(--mono);
+        font-size: 7.5px;
+        letter-spacing: .06em;
+        color: rgba(255, 255, 255, .95);
+    }
+    .wetvals input {
+        width: 46px;
+        padding: 1px 2px;
+        border: 0;
+        border-radius: 2px;
+        background: transparent;
+        color: #ffffff;
+        font: inherit;
+        letter-spacing: inherit;
+        text-align: left;
+        outline: none;
+        -webkit-user-select: text;
+        user-select: text;
+        -webkit-appearance: none;
+        appearance: none;
+    }
+    .wetvals input:last-child { text-align: right; }
+    .wetvals input:focus {
+        background: rgba(255, 32, 55, .14);
+        box-shadow: 0 0 0 1px rgba(255, 32, 55, .60);
+        color: #fff;
+    }
+
+    /* ---- 底栏 ---- */
+    .foot {
+        margin-top: auto;
+        padding-top: 5px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        font-family: var(--mono);
+        font-size: 6.5px;
+        letter-spacing: .24em;
+        text-transform: uppercase;
+        color: rgba(255, 96, 110, .92);
+    }
+    .foot .cell { letter-spacing: .12em; color: rgba(255, 255, 255, .80); }
+
+    /* ---- 缩放三角 ---- */
+    .zoomer {
+        position: absolute;
+        right: 0; bottom: 0;
+        width: 34px; height: 34px;
+        padding: 0;
+        border: 0;
+        background: none;
+        cursor: ns-resize;
+        display: flex;
+        align-items: flex-end;
+        justify-content: flex-end;
+        z-index: 20;
+    }
+    .zoomer svg { display: block; width: 14px; height: 14px; margin: 0 4px 4px 0; }
+    .zoomer path { fill: rgba(200, 200, 200, .38); transition: fill .14s ease; }
+    .zoomer:hover path { fill: rgba(255, 32, 55, .95); }
+    .zoomer[data-host="accepted"] path { fill: rgba(255, 32, 55, .62); }
+    .zoomer[data-host="rejected"] path {
+        fill: none;
+        stroke: rgba(200, 200, 200, .48);
+        stroke-width: 1.1;
+    }
+    .zoomer[data-host="rejected"]:hover path { stroke: rgba(255, 32, 55, .92); fill: none; }
+    .zoomer:active path { fill: var(--red); }
+    .zoomer .zpct {
+        position: absolute;
+        right: 21px; bottom: 4px;
+        font-family: var(--mono);
+        font-size: 6.5px;
+        letter-spacing: .10em;
+        color: rgba(255, 255, 255, .88);
+        opacity: 0;
+        transition: opacity .14s ease;
+        pointer-events: none;
+        white-space: nowrap;
+    }
+    .zoomer:hover .zpct { opacity: 1; }
+    body.dragging-zoom .zoomer .zpct { opacity: 1; }
+
+    /* ================= 场景元素 ================= */
+    .padfill { fill: rgba(0, 0, 0, .92); }
+    .padframe { fill: none; stroke: rgba(200, 200, 200, .13); stroke-width: 1; }
+    .fieldRing {
+        fill: none;
+        stroke: rgba(226, 226, 226, .55);
+        stroke-width: 1;
+        stroke-dasharray: 2 4;
+    }
+    .cen-ring { fill: none; stroke: rgba(255, 32, 55, .90); stroke-width: 1; }
+    .cen-tick { stroke: rgba(255, 32, 55, .90); stroke-width: 1; }
+    .cen-dot { fill: rgba(255, 96, 104, .95); }
+
+    /* 干声游标：只有一个点。亮底用深描边、暗底用白芯，两种背景都读得出 */
+    .dry-dot {
+        fill: rgba(255, 242, 242, .95);
+        stroke: rgba(10, 10, 10, .85);
+        stroke-width: 1;
+    }
+
+    .padhit { fill: transparent; cursor: crosshair; }
+
+    /* ===== 4 声道电平表：与 Quad 逐字一致 =====
+       固定高度带 + space-between 把两个表推到两端，
+       再把 .bar/.dbscale 高度覆盖成能塞进带内的值，避免压到下方控件。 */
+    .mside {
+        position: absolute;
+        top: 88px;
+        height: 130px;
+        display: flex;
+        flex-direction: column;
+        justify-content: space-between;
+        z-index: 4;
+        pointer-events: none;
+    }
+    .mside.l { left: 470px; align-items: flex-start; }
+    .mside.r { right: 18px; align-items: flex-end; }
+    .mside .metercol { position: static; top: auto; }
+    .bar { height: 52px; }
+    .dbscale { height: 52px; }
+</style>
+</head>
+<body>
+
+<div class="canvas" id="canvas">
+
+    <svg id="scene" viewBox="0 0 620 480" aria-hidden="true">
+        <defs>
+            <radialGradient id="bgGrad" cx="50%" cy="40%" r="76%">
+                <stop offset="0%" stop-color="#181112"/>
+                <stop offset="56%" stop-color="#0e0c0c"/>
+                <stop offset="100%" stop-color="#080707"/>
+            </radialGradient>
+
+            <pattern id="noise" width="6" height="6" patternUnits="userSpaceOnUse">
+                <path d="M0 0H6M0 0V6" stroke="rgba(255,32,55,.026)" stroke-width=".7"/>
+            </pattern>
+
+            <radialGradient id="vign" cx="50%" cy="44%" r="66%">
+                <stop offset="0%" stop-color="#000" stop-opacity="0"/>
+                <stop offset="72%" stop-color="#000" stop-opacity=".18"/>
+                <stop offset="100%" stop-color="#000" stop-opacity=".66"/>
+            </radialGradient>
+
+            <linearGradient id="fadeGrad" gradientUnits="userSpaceOnUse" x1="0" y1="430" x2="0" y2="480">
+                <stop offset="0%" stop-color="#0d0c0c" stop-opacity="0"/>
+                <stop offset="100%" stop-color="#0d0c0c" stop-opacity="1"/>
+            </linearGradient>
+
+            <radialGradient id="lvlGrad" cx="50%" cy="50%" r="50%">
+                <stop offset="0%" stop-color="#ff4034" stop-opacity=".18"/>
+                <stop offset="58%" stop-color="#8a1418" stop-opacity=".06"/>
+                <stop offset="100%" stop-color="#8a1418" stop-opacity="0"/>
+            </radialGradient>
+
+            <!-- 薄雾：停靠点由 JS 按 Cutoff Min/Max 的几何映射写入 -->
+            <radialGradient id="mistGrad" cx="50%" cy="50%" r="50%"></radialGradient>
+
+            <!-- 密度纹理：Dens 唯一的视觉出口。
+                 点阵由 JS 用固定种子铺进 16×16 的 tile（明暗各半，
+                 这样在任何亮度的薄雾上都看得出来），tile 边界留 1 单位余量避免切点。 -->
+            <pattern id="grainPat" width="72" height="72" patternUnits="userSpaceOnUse"></pattern>
+
+            <!-- 纹理的可见范围：中心（最暗处）不铺，外缘收掉，避免描边感 -->
+            <radialGradient id="grainFade" cx="50%" cy="50%" r="50%">
+                <stop offset="0%" stop-color="#fff" stop-opacity="0"/>
+                <stop offset="14%" stop-color="#fff" stop-opacity=".85"/>
+                <stop offset="58%" stop-color="#fff" stop-opacity="1"/>
+                <stop offset="82%" stop-color="#fff" stop-opacity=".42"/>
+                <stop offset="100%" stop-color="#fff" stop-opacity="0"/>
+            </radialGradient>
+            <mask id="grainMask" maskContentUnits="objectBoundingBox">
+                <rect x="0" y="0" width="1" height="1" fill="url(#grainFade)"/>
+            </mask>
+
+            <clipPath id="padClip">
+                <rect id="padClipRect" x="105" y="76" width="330" height="330"/>
+            </clipPath>
+            <!-- 声场是圆盘：方形 pad 的四角在盘外，白色场域不该漫出去 -->
+            <clipPath id="discClip">
+                <circle cx="270" cy="241" r="165"/>
+            </clipPath>
+        </defs>
+
+        <rect x="0" y="0" width="620" height="480" fill="url(#bgGrad)"/>
+        <rect x="0" y="0" width="620" height="480" fill="url(#noise)" opacity=".85"/>
+        <rect id="lvlWash" x="110" y="60" width="400" height="360"
+              fill="url(#lvlGrad)" opacity="0" pointer-events="none"/>
+
+        <rect class="padfill" id="padFill" pointer-events="none" x="105" y="76" width="330" height="330"/>
+
+        <g clip-path="url(#discClip)" pointer-events="none">
+            <circle id="mist" cx="270" cy="241" r="82" fill="url(#mistGrad)" opacity="0" pointer-events="none"/>
+            <circle id="grain" cx="270" cy="241" r="82" fill="url(#grainPat)"
+                    mask="url(#grainMask)" opacity="0" pointer-events="none"/>
+
+            <!-- 场域最外圈：裁剪在圆盘内 —— 盘外（方形四角）没有声场，
+                 场域圆漫出盘边时应当被切掉，而不是继续铺在斜纹上 -->
+            <circle class="fieldRing" id="fieldRing" cx="270" cy="241" r="82" pointer-events="none"/>
+        </g>
+
+        <g id="centerMark" opacity="1" pointer-events="none">
+            <circle class="cen-ring" r="6.5"/>
+            <line class="cen-tick" x1="-12" y1="0" x2="-8.5" y2="0"/>
+            <line class="cen-tick" x1="8.5" y1="0" x2="12" y2="0"/>
+            <line class="cen-tick" x1="0" y1="-12" x2="0" y2="-8.5"/>
+            <line class="cen-tick" x1="0" y1="8.5" x2="0" y2="12"/>
+            <circle class="cen-dot" r="1.5"/>
+        </g>
+
+        <!-- 干声游标：只画一个点 -->
+        <g id="swarm" opacity="0" pointer-events="none">
+            <circle class="dry-dot" r="3.2"/>
+        </g>
+
+        <rect class="padhit" id="padhit" x="105" y="76" width="330" height="330"/>
+        <rect class="padframe" id="padframe" pointer-events="none" x="105" y="76" width="330" height="330"/>
+
+        <rect x="0" y="430" width="620" height="50" fill="url(#fadeGrad)" pointer-events="none"/>
+        <rect x="0" y="0" width="620" height="480" fill="url(#vign)" pointer-events="none"/>
+    </svg>
+
+    <div class="hdr">
+        <svg class="mark" viewBox="0 0 16 16" fill="none" aria-hidden="true" style="width:13px;height:13px;flex:none;display:block">
+  <circle cx="8" cy="8" r="1.7" fill="#ff2037"/>
+  <circle cx="5.2" cy="6.6" r="1.15" fill="#ff2037"/>
+  <circle cx="10.7" cy="9.6" r="1.15" fill="#ff2037"/>
+  <circle cx="8.1" cy="11.6" r="0.95" fill="#ff2037"/>
+  <circle cx="10.9" cy="4.6" r="0.95" fill="#ff2037"/>
+  <circle cx="3.6" cy="11.2" r="0.8" fill="#ff2037"/>
+  <circle cx="12.6" cy="8.2" r="0.8" fill="#ff2037"/>
+</svg>
+        <h1>SWARMGRAIN</h1>
+        <div class="sub">4ch Ambisonics</div>
+        <div class="tag" id="posTag">FIELD CENTER 0.50 / 0.50</div>
+    </div>
+
+    <div class="xy h" id="xyH">
+        <div class="xylab">Field Center X</div>
+        <div class="xyval" id="xv">0.50</div>
+        <div class="htrack" id="xtrack">
+            <div class="ffill" id="xfill"></div>
+            <div class="fbar" id="xbar"></div>
+        </div>
+    </div>
+
+    <div class="xy v" id="xyV">
+        <div class="xylab">Field Center Y</div>
+        <div class="xyval" id="yv">0.50</div>
+        <div class="vtrack" id="ytrack">
+            <div class="vfill" id="yfill"></div>
+            <div class="vbar" id="ybar"></div>
+        </div>
+    </div>
+
+    <div class="mside l">
+        <div class="metercol">
+            <span>FL</span>
+            <div class="meterbody">
+                <div class="bar"><i id="mtrFL"></i><b id="capFL"></b></div>
+                <div class="dbscale" id="scaleFL"></div>
+            </div>
+        </div>
+        <div class="metercol">
+            <span>RL</span>
+            <div class="meterbody">
+                <div class="bar"><i id="mtrRL"></i><b id="capRL"></b></div>
+                <div class="dbscale" id="scaleRL"></div>
+            </div>
+        </div>
+    </div>
+    <div class="mside r">
+        <div class="metercol">
+            <span>FR</span>
+            <div class="meterbody mirror">
+                <div class="bar"><i id="mtrFR"></i><b id="capFR"></b></div>
+                <div class="dbscale" id="scaleFR"></div>
+            </div>
+        </div>
+        <div class="metercol">
+            <span>RR</span>
+            <div class="meterbody mirror">
+                <div class="bar"><i id="mtrRR"></i><b id="capRR"></b></div>
+                <div class="dbscale" id="scaleRR"></div>
+            </div>
+        </div>
+    </div>
+
+    <div class="winpanel">
+        <div class="sh"><span>Window</span></div>
+        <div class="wlist" id="wlist" role="radiogroup" aria-label="Grain window">
+            <button class="wopt" type="button" data-v="1"><i></i>Half Sine</button>
+            <button class="wopt" type="button" data-v="2"><i></i>Rect</button>
+            <button class="wopt" type="button" data-v="3"><i></i>Hamming</button>
+            <button class="wopt" type="button" data-v="4"><i></i>Gauss</button>
+            <button class="wopt" type="button" data-v="5"><i></i>Triangle</button>
+        </div>
+        <svg class="wprev" id="wprev" viewBox="0 0 148 46" aria-hidden="true">
+            <line class="grid" x1="0" y1="23" x2="148" y2="23"/>
+            <line class="grid" x1="0" y1="45.5" x2="148" y2="45.5"/>
+            <path class="curve" id="wcurve" d=""/>
+        </svg>
+    </div>
+
+    <div class="deck">
+
+        <section class="sec">
+            <div class="sh"><b>01</b><span>Gauss Field</span></div>
+            <div class="grid" id="grid1"></div>
+        </section>
+
+        <section class="sec">
+            <div class="sh"><b>02</b><span>Delay Grain</span></div>
+            <div class="grid" id="grid2"></div>
+        </section>
+
+        <section class="sec">
+            <div class="sh"><b>03</b><span>Room</span></div>
+            <div class="grid" id="grid4"></div>
+            <div class="wetrow">
+                <div class="wt"><span>Wet Send · Min / Max</span><span>reverb</span></div>
+                <div class="dual" id="dual">
+                    <div class="ticks"></div>
+                    <div class="track"></div>
+                    <div class="fill" id="wetRange"></div>
+                    <div class="thumb" id="thumbMin"></div>
+                    <div class="thumb" id="thumbMax"></div>
+                </div>
+                <div class="wetvals">
+                    <input id="wetMinOut" type="text" inputmode="decimal" value="0.10" spellcheck="false" autocomplete="off">
+                    <input id="wetMaxOut" type="text" inputmode="decimal" value="0.60" spellcheck="false" autocomplete="off">
+                </div>
+            </div>
+        </section>
+
+        <section class="sec">
+            <div class="sh"><b>04</b><span>Master</span></div>
+            <div class="grid" id="grid5"></div>
+        </section>
+
+        <div class="foot">
+            <span>Wildtrace Series</span>
+            <span class="cell" id="cutTag">CUT —</span>
+        </div>
+
+    </div><!-- /.deck -->
+</div><!-- /.canvas -->
+
+<button class="zoomer" id="zoomer" type="button" aria-label="拖动缩放界面，双击回到 100%" title="往右下拖变大、往左上拖变小 · 双击回到 100%">
+    <span class="zpct" id="zpct">100%</span>
+    <svg viewBox="0 0 10 10" aria-hidden="true"><path d="M10 2.6 L2.6 10 L10 10 Z"/></svg>
+</button>
+
+<script type="module">
+import { Cabbage } from './cabbage/cabbage.js';
+
+const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
+/* 把归一化坐标钳制到圆盘内（圆盘半径 0.5，圆心 0.5,0.5） */
+const clampDisc01 = (x, y) => {
+    const dx = x - 0.5, dy = y - 0.5, d = Math.hypot(dx, dy);
+    if (d <= 0.5 || d === 0) return [x, y];
+    return [0.5 + dx / d * 0.5, 0.5 + dy / d * 0.5];
+};
+
+/* 场域中心必须落在圆盘内 —— 方形 pad 的四角在盘外，那里没有声场。
+   钳制放在**参数层**而不是只钳显示：否则推子位置/读数会和圆的圆心对不上，
+   后端又按钳制后的值算声像，三处读数是三个数。 */
+const setFieldCenter = (x, y) => {
+    const [cx, cy] = clampDisc01(clamp(x, 0, 1), clamp(y, 0, 1));
+    centerX = cx;
+    centerY = cy;
+};
+const $ = id => document.getElementById(id);
+const NS = 'http://www.w3.org/2000/svg';
+
+/* ---------------- 参数表 ----------------
+   min / max / def 必须与 CSD 的 <Cabbage> 逐项一致（def = defaultValue，双击归位回到它）。
+   curve 是推子行程 ↔ 参数值的映射（§6.16）：跨数量级的参数必须给，
+   否则常用的低端会挤在轨道的头几个像素里。 */
+const P = {
+    Dens:     { min: 1,     max: 500,   curve: 2, step: 1,     def: 100,   fmt: v => String(Math.round(v)) },
+    step:     { min: 0.001, max: 0.5,   curve: 4, step: 0.001, def: 0.5,   fmt: v => v.toFixed(3) },
+    radius:   { min: 0.01,  max: 0.5,   curve: 0, step: 0.01,  def: 0.25,  fmt: v => v.toFixed(2) },
+    rangeMin: { min: 20,    max: 20000, curve: 7, step: 1,     def: 20000, fmt: v => String(Math.round(v)) },
+    rangeMax: { min: 20,    max: 20000, curve: 7, step: 1,     def: 100,   fmt: v => String(Math.round(v)) },
+    GSize:    { min: 0.005, max: 1,     curve: 3, step: 0.001, def: 0.1,   fmt: v => v.toFixed(3) },
+    DlyMax:   { min: 0.01,  max: 5,     curve: 4, step: 0.001, def: 1,     fmt: v => v.toFixed(3) },
+    reverse:  { min: 0,     max: 1,     curve: 0, step: 0.001, def: 0.5,   fmt: v => v.toFixed(3) },
+    roomSize: { min: 10,    max: 100,   curve: 1, step: 0.1,   def: 50,    fmt: v => String(Math.round(v)) },
+    cutoff:   { min: 1000,  max: 16000, curve: 3, step: 1,     def: 16000,  fmt: v => String(Math.round(v)) },
+    drywet:   { min: 0,     max: 1,     curve: 0, step: 0.01,  def: 0.5,   fmt: v => v.toFixed(2) },
+    level:    { min: 0,     max: 8,     curve: 0, step: 0.01,  def: 2,     fmt: v => v.toFixed(2) }
+};
+
+const V = {
+    Dens: 100, step: 0.5, radius: 0.25,
+    rangeMin: 20000, rangeMax: 100,
+    GSize: 0.1, DlyMax: 1, reverse: 0.5,
+    roomSize: 50, cutoff: 16000, drywet: 0.5, level: 2
+};
+
+/* 场域中心（A 类宿主参数：场景里既能拖 pad，也有 X / Y 推子） */
+let centerX = 0.5, centerY = 0.5;
+let winIdx = 4;
+
+const WET_DEF = { minWet: 0.1, maxWet: 0.6 };
+let minWet = 0.1, maxWet = 0.6;
+
+/* 必须与 CSD 中 automatable:true widget 的书写顺序逐字一致 */
+const PARAM_IDX = ['Dens', 'step', 'centerX', 'centerY', 'radius', 'rangeMin', 'rangeMax',
+                   'GSize', 'DlyMax', 'reverse', 'window',
+                   'minWet', 'maxWet', 'roomSize', 'cutoff', 'drywet', 'level'];
+
+const FADER_KEYS = Object.keys(P);
+const dragOn = Object.assign(
+    { wet: null, zoom: false, pad: false, centerX: false, centerY: false },
+    Object.fromEntries(FADER_KEYS.map(k => [k, false]))
+);
+
+/* ---------------- 推子行程曲线（§6.16） ---------------- */
+const CURVE_MAX_K = 12;
+const curveToNorm = (f, k) => {
+    if (!k) return f;
+    const K = Math.min(Math.abs(k), CURVE_MAX_K), A = Math.exp(K) - 1;
+    return k > 0 ? (Math.exp(K * f) - 1) / A
+                 : 1 - (Math.exp(K * (1 - f)) - 1) / A;
+};
+const normToCurve = (n, k) => {
+    if (!k) return n;
+    const K = Math.min(Math.abs(k), CURVE_MAX_K), A = Math.exp(K) - 1;
+    return k > 0 ? Math.log(1 + n * A) / K
+                 : 1 - Math.log(1 + (1 - n) * A) / K;
+};
+const toFrac   = (v, p) => normToCurve(clamp((v - p.min) / (p.max - p.min), 0, 1), p.curve || 0);
+const fromFrac = (f, p) => p.min + (p.max - p.min) * curveToNorm(clamp(f, 0, 1), p.curve || 0);
+
+/* ---------------- 场景几何 ----------------
+   pad 固定（0..1 坐标系）；场域圆（半径 = Field Radius）跟着场域中心移动。 */
+const PAD = { x: 105, y: 76, w: 330, h: 330 };
+
+const toScreen = (x, y) => {
+    const [cx, cy] = clampDisc01(clamp(x, 0, 1), clamp(y, 0, 1));
+    return {
+        x: PAD.x + cx * PAD.w,
+        y: PAD.y + (1 - cy) * PAD.h
+    };
+};
+
+const svgEl = (name, attrs) => {
+    const el = document.createElementNS(NS, name);
+    for (const k in attrs) el.setAttribute(k, attrs[k]);
+    return el;
+};
+
+/* 与 Csound 完全相同的滤波映射：
+     gauss  = exp(-(d² · 5))
+     cutoff = rangeMin · (rangeMax / rangeMin) ^ gauss
+     bright = log10(cutoff/20) / log10(20000/20)   → 0..1  */
+function cutoffAt(d) {
+    const g = Math.exp(-(d * d * 5));
+    return V.rangeMin * Math.pow(V.rangeMax / V.rangeMin, g);
+}
+function brightOf(cut) {
+    const b = Math.log10(Math.max(cut, 20) / 20) / Math.log10(20000 / 20);
+    return clamp(b, 0, 1);
+}
+const greyOf = b => Math.round(clamp(b * 255, 1, 255));
+
+const fieldCenter = () => toScreen(centerX, centerY);
+const fieldR = () => V.radius * PAD.w;
+
+/* ---------------- 场域绘制 ----------------
+   只有两层圈：最外一圈（场域边界）+ 最内中心标志；其余交给薄雾和粒子。 */
+function paintField() {
+    const c = fieldCenter();
+    const r = fieldR();
+
+    $('fieldRing').setAttribute('cx', c.x.toFixed(2));
+    $('fieldRing').setAttribute('cy', c.y.toFixed(2));
+    $('fieldRing').setAttribute('r', r.toFixed(2));
+
+    $('centerMark').setAttribute('transform',
+        'translate(' + c.x.toFixed(2) + ' ' + c.y.toFixed(2) + ')');
+
+    const mist = $('mist');
+    mist.setAttribute('cx', c.x.toFixed(2));
+    mist.setAttribute('cy', c.y.toFixed(2));
+    mist.setAttribute('r', r.toFixed(2));
+    mist.setAttribute('opacity', '1');
+
+    const grain = $('grain');
+    grain.setAttribute('cx', c.x.toFixed(2));
+    grain.setAttribute('cy', c.y.toFixed(2));
+    grain.setAttribute('r', r.toFixed(2));
+    grain.setAttribute('opacity', '1');
+
+    /* ===== 薄雾：场域里唯一的视觉，亮度严格等于该半径处的截止频率 =====
+       DSP 映射（与 Csound instr 2 逐字一致）：
+         gauss  = exp(-(d² · 5))
+         cutoff = rangeMin · (rangeMax / rangeMin) ^ gauss
+       然后把 cutoff 对数压到 0..1 当作亮度：
+         bright = log10(cutoff/20) / log10(20000/20)
+       所以中心（低截止）暗、外缘（高截止）亮 —— 这不是装饰，就是滤波器在
+       这个半径上"开多大"。
+
+       三条硬性要求：
+       1. 停靠点要密（40 个）。只有 7 个时能看见同心色阶，像等高线。
+       2. 每个停靠点的颜色都从公式现算，不许手写近似值，否则与声音脱钩。
+       3. 透明度恒定，只在最外一段羽化。用透明度模拟亮度会和外缘的
+          高截止叠加，看起来像凭空多了一圈发光边界。
+
+       透明度为什么必须是 1.0：薄雾是半透明图元，最终像素 = 颜色 × alpha + 底色 × (1-alpha)。
+       底色近乎纯黑，所以 alpha 直接压低"最亮能到多亮"：
+         alpha 0.52 → 20000 Hz 的 rgb(253) 落到屏幕上只有 133（中灰）
+         alpha 1.00 → 253 就是 253（白）
+       要"最高截止 = 白、最低截止 = 黑"这整条刻度，就只能让 alpha 恒为 1，
+       把明暗完全交给颜色。半透明会让高端永远够不到白，用户的判断没错。 */
+    const MIST_STOPS = 40;
+    const FADE_FROM = 0.86;
+    const MIST_ALPHA = 1.0;
+
+    const g = $('mistGrad');
+    g.innerHTML = '';
+    for (let i = 0; i <= MIST_STOPS; i++) {
+        const f = i / MIST_STOPS;
+        const v = greyOf(brightOf(cutoffAt(f)));
+        /* 最外 14% 平滑羽化：smoothstep，避免出现一条硬圆边 */
+        let a = MIST_ALPHA;
+        if (f > FADE_FROM) {
+            const t = (f - FADE_FROM) / (1 - FADE_FROM);
+            a = MIST_ALPHA * (1 - t * t * (3 - 2 * t));
+        }
+        g.appendChild(svgEl('stop', {
+            offset: (f * 100).toFixed(2) + '%',
+            'stop-color': 'rgb(' + v + ',' + v + ',' + v + ')',
+            'stop-opacity': a.toFixed(4)
+        }));
+    }
+
+    /* 底栏读数：直接报出中心与外缘的截止频率，参数一动就跟着变 */
+    const cutC = cutoffAt(0), cutE = cutoffAt(1);
+    const hz = v => v >= 1000 ? (v / 1000).toFixed(1) + 'k' : String(Math.round(v));
+    $('cutTag').textContent = 'CUT ' + hz(cutC) + ' → ' + hz(cutE) + ' Hz';
+
+    paintGrain();
+    paintXY();
+}
+
+/* ===== 密度纹理 =====
+   Dens 没有几何出口（它只决定每秒出多少颗粒），所以用「纹理」承载：
+     · 颗粒尺度 —— 密度越高，点越小、越密
+     · 纹理强度 —— 密度越高，点的反差越大
+   一支参数只走一条视觉通道，绝不动薄雾的亮度（亮度归 Cutoff Min/Max）。
+   点阵是静态 pattern，不生成任何逐帧元素；用固定种子，点位不抖。 */
+const GRAIN_TILE = 72;     /* tile 边长（user unit）：足够大，重复周期看不出来 */
+const GRAIN_BUCKETS = 24;  /* 只在桶变化时重建图案，拖推子不会每帧重刷 DOM */
+const GRAIN_SEED = 0x5eed1a;
+let grainBucket = -1;
+
+function buildGrain(bucket) {
+    const f = bucket / GRAIN_BUCKETS;
+    /* 分层网格（每格一颗，格内随机偏移）：纯随机会结块，看着像气泡不像颗粒 */
+    const cells = Math.round(10 + 5 * f);       /* 10×10 → 15×15 */
+    const step = GRAIN_TILE / cells;
+    const rMax = 1.45 - 0.70 * f;               /* 半径 1.45 → 0.75 unit（越密越细） */
+    const jit = step - 2 * rMax - 0.25;         /* 偏移要留出余量，点不越格也不互相压 */
+    const pat = $('grainPat');
+    pat.innerHTML = '';
+    let s = GRAIN_SEED;
+    /* xorshift32：固定种子 → 每次重建点位完全一致，只有"格数/半径"在变 */
+    const rnd = () => {
+        s ^= s << 13; s ^= s >>> 17; s ^= s << 5;
+        return (s >>> 0) / 4294967296;
+    };
+    for (let gy = 0; gy < cells; gy++) {
+        for (let gx = 0; gx < cells; gx++) {
+            const ox = rMax + 0.12 + rnd() * Math.max(jit, 0);
+            const oy = rMax + 0.12 + rnd() * Math.max(jit, 0);
+            const r = rMax * (0.82 + 0.18 * rnd());
+            pat.appendChild(svgEl('circle', {
+                cx: (gx * step + ox).toFixed(2),
+                cy: (gy * step + oy).toFixed(2),
+                r: r.toFixed(2),
+                /* 明暗各半：薄雾从近黑到近白都有，单一色调总有一半看不见 */
+                fill: rnd() > 0.47 ? 'rgba(255,255,255,.50)' : 'rgba(0,0,0,.45)'
+            }));
+        }
+    }
+}
+
+function paintGrain() {
+    const f = toFrac(clamp(V.Dens, P.Dens.min, P.Dens.max), P.Dens);
+    const b = Math.round(f * GRAIN_BUCKETS);
+    if (b !== grainBucket) { grainBucket = b; buildGrain(b); }
+    $('grain').setAttribute('opacity', (0.07 + 0.22 * f).toFixed(3));
+}
+
+function paintXY() {
+    $('xbar').style.left = (centerX * 100).toFixed(3) + '%';
+    $('xfill').style.width = (centerX * 100).toFixed(3) + '%';
+    $('ybar').style.top = ((1 - centerY) * 100).toFixed(3) + '%';
+    $('yfill').style.height = (centerY * 100).toFixed(3) + '%';
+    $('xv').textContent = centerX.toFixed(2);
+    $('yv').textContent = centerY.toFixed(2);
+    $('posTag').textContent = 'FIELD CENTER ' + centerX.toFixed(2) + ' / ' + centerY.toFixed(2);
+}
+
+/* ---------------- 推子的值 / UI 同步 ---------------- */
+const FADER_UI = {};
+
+function paintFader(key) {
+    const ui = FADER_UI[key];
+    if (!ui) return;
+    const p = P[key];
+    const f = toFrac(clamp(V[key], p.min, p.max), p);
+    ui.bar.style.left = (f * 100).toFixed(3) + '%';
+    ui.fill.style.width = (f * 100).toFixed(3) + '%';
+    if (editing.key === key) return;
+    ui.val.value = p.fmt(V[key]);
+}
+
+function setParam(key, v) {
+    V[key] = v;
+    if (key === 'radius' || key === 'rangeMin' || key === 'rangeMax') paintField();
+    else if (key === 'Dens') paintGrain();
+    paintFader(key);
+}
+
+/* ---------------- 数值输入（§6.8） ---------------- */
+const editing = { key: null, el: null };
+
+function parseNum(raw, p) {
+    let t = String(raw).trim().toLowerCase().replace(/\s+/g, '');
+    if (!t) return NaN;
+    let mul = 1;
+    if (t.endsWith('k')) { mul = 1000; t = t.slice(0, -1); }
+    else if (t.endsWith('hz')) { t = t.slice(0, -2); }
+    const n = parseFloat(t);
+    if (!isFinite(n)) return NaN;
+    const v = n * mul;
+    return clamp(Math.round(v / p.step) * p.step, p.min, p.max);
+}
+
+function commitEdit() {
+    const key = editing.key;
+    if (!key) return;
+    const el = editing.el;
+    editing.key = null;
+    editing.el = null;
+    const v = parseNum(el.value, P[key]);
+    el.blur();
+    if (!isFinite(v)) { paintFader(key); return; }
+    setParam(key, v);
+    Cabbage.sendControlData({ channel: key, value: v, gesture: 'complete' }, null);
+}
+
+function resetParam(key) {
+    const d = P[key].def;
+    setParam(key, d);
+    Cabbage.sendControlData({ channel: key, value: d, gesture: 'complete' }, null);
+}
+
+function bindValueInput(key) {
+    const el = FADER_UI[key].val;
+    el.addEventListener('pointerdown', e => {
+        e.stopPropagation();
+        if (editing.key && editing.key !== key) commitEdit();
+        editing.key = key;
+        editing.el = el;
+    });
+    el.addEventListener('focus', () => {
+        editing.key = key;
+        editing.el = el;
+        el.select();
+    });
+    el.addEventListener('keydown', e => {
+        e.stopPropagation();
+        if (e.key === 'Enter') { e.preventDefault(); commitEdit(); }
+        else if (e.key === 'Escape') {
+            e.preventDefault();
+            editing.key = null; editing.el = null;
+            paintFader(key);
+            el.blur();
+        }
+    });
+    el.addEventListener('blur', () => { if (editing.key === key) commitEdit(); });
+    el.addEventListener('dblclick', e => {
+        e.preventDefault();
+        editing.key = null; editing.el = null;
+        el.blur();
+        resetParam(key);
+    });
+}
+
+/* ---------------- 推子构建 + 交互 ---------------- */
+function makeFaderRow(key, label) {
+    const row = document.createElement('div');
+    row.className = 'frow';
+
+    const lab = document.createElement('span');
+    lab.className = 'flab';
+    lab.textContent = label;
+
+    const track = document.createElement('div');
+    track.className = 'ftrack';
+
+    const fill = document.createElement('div');
+    fill.className = 'ffill';
+    const bar = document.createElement('div');
+    bar.className = 'fbar';
+    track.appendChild(fill);
+    track.appendChild(bar);
+
+    const val = document.createElement('input');
+    val.className = 'fval';
+    val.type = 'text';
+    val.inputMode = 'decimal';
+    val.spellcheck = false;
+    val.autocomplete = 'off';
+    val.value = P[key].fmt(V[key]);
+
+    row.appendChild(lab);
+    row.appendChild(track);
+    row.appendChild(val);
+
+    FADER_UI[key] = { bar, fill, val, track };
+    bindTrack(key, track);
+    bindValueInput(key);
+    return row;
+}
+
+function bindTrack(key, track) {
+    const p = P[key];
+    let active = false, moved = false, lastV = null;
+
+    const valueAt = clientX => {
+        const box = track.getBoundingClientRect();
+        const f = clamp((clientX - box.left) / box.width, 0, 1);
+        const v = fromFrac(f, p);
+        return clamp(Math.round(v / p.step) * p.step, p.min, p.max);
+    };
+    const send = (gesture, v) => {
+        Cabbage.sendControlData({ channel: key, value: v, gesture }, null);
+        lastV = v;
+    };
+
+    track.addEventListener('pointerdown', e => {
+        if (e.button !== 0) return;
+        if (editing.key && editing.key !== key) commitEdit();
+        active = true;
+        moved = false;
+        dragOn[key] = true;
+        track.setPointerCapture(e.pointerId);
+        e.preventDefault();
+        const v = valueAt(e.clientX);
+        setParam(key, v);
+        send('begin', v);
+    });
+
+    track.addEventListener('pointermove', e => {
+        if (!active) return;
+        moved = true;
+        e.preventDefault();
+        const v = valueAt(e.clientX);
+        setParam(key, v);
+        if (v !== lastV) send('value', v);
+    });
+
+    const up = e => {
+        if (!active) return;
+        active = false;
+        dragOn[key] = false;
+        try { track.releasePointerCapture(e.pointerId); } catch (_) {}
+        send(moved ? 'end' : 'complete', V[key]);
+    };
+    track.addEventListener('pointerup', up);
+    track.addEventListener('pointercancel', up);
+
+    track.addEventListener('dblclick', e => {
+        e.preventDefault();
+        resetParam(key);
+    });
+}
+
+/* ---------------- 场景里的 X / Y 推子 ---------------- */
+function bindAxis(which) {
+    const track = $(which === 'x' ? 'xtrack' : 'ytrack');
+    const key = which === 'x' ? 'centerX' : 'centerY';
+    let active = false, moved = false;
+
+    const valueAt = e => {
+        const box = track.getBoundingClientRect();
+        const f = which === 'x'
+            ? clamp((e.clientX - box.left) / box.width, 0, 1)
+            : clamp(1 - (e.clientY - box.top) / box.height, 0, 1);
+        return Math.round(f * 100) / 100;
+    };
+    const apply = (v, gesture) => {
+        setFieldCenter(which === 'x' ? v : centerX, which === 'x' ? centerY : v);
+        paintField();
+        Cabbage.sendControlData(
+            { channel: key, value: which === 'x' ? centerX : centerY, gesture }, null);
+    };
+
+    track.addEventListener('pointerdown', e => {
+        if (e.button !== 0) return;
+        if (editing.key) commitEdit();
+        active = true;
+        moved = false;
+        dragOn[key] = true;
+        track.setPointerCapture(e.pointerId);
+        e.preventDefault();
+        apply(valueAt(e), 'begin');
+    });
+    track.addEventListener('pointermove', e => {
+        if (!active) return;
+        moved = true;
+        e.preventDefault();
+        apply(valueAt(e), 'value');
+    });
+    const up = e => {
+        if (!active) return;
+        active = false;
+        dragOn[key] = false;
+        try { track.releasePointerCapture(e.pointerId); } catch (_) {}
+        apply(which === 'x' ? centerX : centerY, moved ? 'end' : 'complete');
+    };
+    track.addEventListener('pointerup', up);
+    track.addEventListener('pointercancel', up);
+
+    /* 双击 = 回正中 */
+    track.addEventListener('dblclick', e => {
+        e.preventDefault();
+        if (which === 'x') centerX = 0.5; else centerY = 0.5;
+        paintField();
+        Cabbage.sendControlData({ channel: key, value: 0.5, gesture: 'complete' }, null);
+    });
+}
+
+/* ---------------- pad 直接拖拽场域中心 ---------------- */
+let padDrag = null;
+let lastPadTap = 0;
+
+function padValueAt(e) {
+    const box = $('padhit').getBoundingClientRect();
+    return {
+        x: Math.round(clamp((e.clientX - box.left) / box.width, 0, 1) * 100) / 100,
+        y: Math.round(clamp(1 - (e.clientY - box.top) / box.height, 0, 1) * 100) / 100
+    };
+}
+
+function padApply(p, gesture) {
+    setFieldCenter(p.x, p.y);
+    paintField();
+    Cabbage.sendControlData({ channel: 'centerX', value: centerX, gesture }, null);
+    Cabbage.sendControlData({ channel: 'centerY', value: centerY, gesture }, null);
+}
+
+$('padhit').addEventListener('pointerdown', e => {
+    if (e.button !== 0) return;
+    if (editing.key) commitEdit();
+    padDrag = { moved: false, t: performance.now() };
+    dragOn.pad = true;
+    $('padhit').setPointerCapture(e.pointerId);
+    e.preventDefault();
+    padApply(padValueAt(e), 'begin');
+});
+
+$('padhit').addEventListener('pointermove', e => {
+    if (!padDrag) return;
+    padDrag.moved = true;
+    e.preventDefault();
+    padApply(padValueAt(e), 'value');
+});
+
+function endPad(e) {
+    if (!padDrag) return;
+    const moved = padDrag.moved;
+    const dt = performance.now() - padDrag.t;
+    padDrag = null;
+    dragOn.pad = false;
+    try { $('padhit').releasePointerCapture(e.pointerId); } catch (_) {}
+    if (moved) {
+        padApply({ x: centerX, y: centerY }, 'end');
+        return;
+    }
+    if (dt < 320 && lastPadTap && performance.now() - lastPadTap < 350) {
+        lastPadTap = 0;
+        padApply({ x: 0.5, y: 0.5 }, 'complete');
+        return;
+    }
+    lastPadTap = performance.now();
+    padApply({ x: centerX, y: centerY }, 'complete');
+}
+$('padhit').addEventListener('pointerup', endPad);
+$('padhit').addEventListener('pointercancel', endPad);
+$('padhit').addEventListener('contextmenu', e => e.preventDefault());
+
+/* ---------------- 窗函数形状预览 ---------------- */
+/* 五个窗函数必须与 CSD 里的 ftgen 表逐点一致（x = 表内归一化位置 0..1）。
+   实测值来自 csound 直接读表，不是猜的：
+
+     表  名称        x=0      .125     .25      .375     .5
+     101 HalfSine   0.0000   0.3827   0.7071   0.9239   1.0000   ← sin(πx)
+     102 Rect       1.0000   1.0000   1.0000   1.0000   1.0000
+     103 Hamming    0.0800   0.2147   0.5400   0.8653   1.0000   ← 0.54-0.46cos(2πx)
+     104 Gauss      0.0000   0.0000   0.0111   0.3247   1.0000   ← exp(-0.5((x-.5)/(1/12))²)
+     105 Triangle   0.0000   0.2500   0.5000   0.7500   1.0000
+
+   101 是 `ftgen 101, 0, 1024, 9, 0.5, 1, 0`：GEN09 的 p1 是"分音号"，
+   允许小数，0.5 就是半频 → sin(0.5 · 2πx) = sin(πx)，即**半个周期的正弦**，
+   从 0 升到 1 再回到 0 的单峰，不是一整周期。 */
+function windowShape(idx, x) {
+    switch (idx) {
+        case 1: return Math.sin(Math.PI * x);
+        case 2: return 1;
+        case 3: return 0.54 - 0.46 * Math.cos(2 * Math.PI * x);
+        case 4: return Math.exp(-0.5 * Math.pow((x - 0.5) / (1 / 12), 2));
+        default: return 1 - Math.abs(2 * x - 1);
+    }
+}
+
+function paintWindow() {
+    for (const el of document.querySelectorAll('.wopt')) {
+        el.classList.toggle('on', Number(el.dataset.v) === winIdx);
+    }
+    /* viewBox 与 CSS 尺寸都是 148x46 → 1:1，波形不会被拉伸 */
+    const W = 148, H = 46, PADY = 3;
+    let d = '';
+    for (let i = 0; i <= 74; i++) {
+        const x = i / 74;
+        const y = H - PADY - windowShape(winIdx, x) * (H - PADY * 2);
+        d += (i === 0 ? 'M' : 'L') + (x * W).toFixed(2) + ' ' + y.toFixed(2) + ' ';
+    }
+    $('wcurve').setAttribute('d', d.trim());
+}
+
+for (const el of document.querySelectorAll('.wopt')) {
+    el.addEventListener('pointerdown', e => e.stopPropagation());
+    el.addEventListener('click', () => {
+        const n = Number(el.dataset.v);
+        if (n === winIdx) return;
+        winIdx = n;
+        paintWindow();
+        Cabbage.sendControlData({ channel: 'window', value: n, gesture: 'complete' }, null);
+    });
+}
+
+/* ---------------- 干声游标（§6.17） ----------------
+   只画一个点：它表示干声滤波此刻读到 pad 上的哪个位置。
+   不画拖尾 —— 游标的步进速率由 Dens 控制，拖尾会把这个速率的变化直接画成
+   "场域在动/半径在变"，而真正决定尺寸的只有 radius。一个点只回答"现在在哪"。 */
+let posX = 0.5, posY = 0.5;
+
+function placeSwarm(p) {
+    const g = $('swarm');
+    g.setAttribute('transform', 'translate(' + p.x.toFixed(2) + ' ' + p.y.toFixed(2) + ')');
+    g.setAttribute('opacity', '1');
+}
+
+/* ---------------- 坐标合并到同一帧（§6.11） ---------------- */
+let pendX = null, pendY = null, markerRaf = 0;
+
+function queueMarker(x, y) {
+    if (x != null) pendX = x;
+    if (y != null) pendY = y;
+    if (markerRaf) return;
+    markerRaf = requestAnimationFrame(() => {
+        markerRaf = 0;
+        if (pendX == null && pendY == null) return;
+        const nx = pendX == null ? posX : pendX;
+        const ny = pendY == null ? posY : pendY;
+        pendX = pendY = null;
+        updateMarker(nx, ny);
+    });
+}
+
+function updateMarker(x, y) {
+    posX = clamp(x, 0, 1);
+    posY = clamp(y, 0, 1);
+    placeSwarm(toScreen(posX, posY));
+}
+
+/* ---------------- 湿声发送 ---------------- */
+function paintWet() {
+    const w = $('dual').clientWidth;
+    const l = minWet * w, r = maxWet * w;
+    $('wetRange').style.left = l + 'px';
+    $('wetRange').style.width = Math.max(0, r - l) + 'px';
+    $('thumbMin').style.left = l + 'px';
+    $('thumbMax').style.left = r + 'px';
+    paintWetOut();
+}
+
+const wetEditing = { key: null };
+function paintWetOut() {
+    if (wetEditing.key !== 'minWet') $('wetMinOut').value = minWet.toFixed(2);
+    if (wetEditing.key !== 'maxWet') $('wetMaxOut').value = maxWet.toFixed(2);
+}
+
+function bindWetField(id, key) {
+    const el = $(id);
+    const p = { min: 0, max: 1, step: 0.01 };
+    const commit = () => {
+        if (wetEditing.key !== key) return;
+        wetEditing.key = null;
+        const v = parseNum(el.value, p);
+        if (!isFinite(v)) { paintWetOut(); return; }
+        if (key === 'minWet') minWet = clamp(v, 0, Math.max(0, maxWet - 0.02));
+        else maxWet = clamp(v, Math.min(1, minWet + 0.02), 1);
+        paintWet();
+        Cabbage.sendControlData({ channel: key, value: key === 'minWet' ? minWet : maxWet, gesture: 'complete' }, null);
+    };
+    el.addEventListener('focus', () => { wetEditing.key = key; el.select(); });
+    el.addEventListener('keydown', e => {
+        e.stopPropagation();
+        if (e.key === 'Enter') { e.preventDefault(); commit(); el.blur(); }
+        else if (e.key === 'Escape') { e.preventDefault(); wetEditing.key = null; paintWetOut(); el.blur(); }
+    });
+    el.addEventListener('blur', commit);
+    el.addEventListener('pointerdown', e => e.stopPropagation());
+    el.addEventListener('dblclick', e => {
+        e.preventDefault();
+        wetEditing.key = null;
+        if (key === 'minWet') minWet = WET_DEF.minWet;
+        else maxWet = WET_DEF.maxWet;
+        paintWet();
+        el.blur();
+        Cabbage.sendControlData({ channel: key, value: key === 'minWet' ? minWet : maxWet, gesture: 'complete' }, null);
+    });
+}
+
+const wetFrom = e => {
+    const box = $('dual').getBoundingClientRect();
+    const f = clamp((e.clientX - box.left) / box.width, 0, 1);
+    if (dragOn.wet === 'min') minWet = Math.min(f, maxWet - 0.02);
+    else maxWet = Math.max(f, minWet + 0.02);
+    paintWet();
+    return dragOn.wet === 'min' ? minWet : maxWet;
+};
+
+function bindThumb(id, which) {
+    const el = $(id);
+    const ch = which === 'min' ? 'minWet' : 'maxWet';
+    el.addEventListener('pointerdown', e => {
+        if (editing.key) commitEdit();
+        dragOn.wet = which;
+        el.setPointerCapture(e.pointerId);
+        e.preventDefault();
+        Cabbage.sendControlData({ channel: ch, value: wetFrom(e), gesture: 'begin' }, null);
+    });
+    el.addEventListener('pointermove', e => {
+        if (dragOn.wet !== which) return;
+        Cabbage.sendControlData({ channel: ch, value: wetFrom(e), gesture: 'value' }, null);
+    });
+    const up = () => {
+        if (dragOn.wet !== which) return;
+        dragOn.wet = null;
+        Cabbage.sendControlData({ channel: ch, value: which === 'min' ? minWet : maxWet, gesture: 'end' }, null);
+    };
+    el.addEventListener('pointerup', up);
+    el.addEventListener('pointercancel', up);
+}
+
+/* ---------------- 电平表 ---------------- */
+const METER_H = 52;
+const DB_MIN = -60;
+const DB_TICKS = [0, -12, -24, -40, -60];
+
+const ampToDb = a => 20 * Math.log10(Math.max(Math.abs(a), 1e-6));
+const dbToPos = db => clamp((db - DB_MIN) / (0 - DB_MIN), 0, 1);
+
+function buildDbScales() {
+    for (const id of ['scaleFL', 'scaleFR', 'scaleRL', 'scaleRR']) {
+        const el = $(id);
+        el.innerHTML = '';
+        for (const db of DB_TICKS) {
+            const t = document.createElement('div');
+            t.className = 't' + (db === 0 ? ' zero' : '') + (db % 12 === 0 ? ' major' : '');
+            t.style.bottom = (dbToPos(db) * 100).toFixed(3) + '%';
+            const n = document.createElement('span');
+            n.className = 'n';
+            n.textContent = db === 0 ? '0' : String(db);
+            t.appendChild(n);
+            el.appendChild(t);
+        }
+    }
+}
+
+function setMeter(id, capId, amp) {
+    const db = clamp(ampToDb(amp), DB_MIN, 0);
+    const pos = dbToPos(db);
+    $(id).style.transform = 'scaleY(' + pos.toFixed(4) + ')';
+    const cap = $(capId);
+    cap.style.transform = 'translateY(' + (-pos * METER_H).toFixed(1) + 'px)';
+    cap.style.opacity = pos > 0.002 ? '.95' : '0';
+}
+
+function updateGlow(l, r) {
+    const lv = clamp(Math.max(l, r), 0, 1);
+    $('lvlWash').setAttribute('opacity', (0.04 + lv * 0.5).toFixed(3));
+}
+
+/* ---------------- 接收后端 ---------------- */
+let lvlL = 0, lvlR = 0, lvlRL = 0, lvlRR = 0;
+function applyValue(id, v) {
+    if (v === undefined || v === null) return;
+    if (typeof v !== 'number') {
+        v = Number(v);
+        if (isNaN(v)) return;
+    }
+    switch (id) {
+        case 'swarm_x': queueMarker(v, null); break;
+        case 'swarm_y': queueMarker(null, v); break;
+
+        case 'centerX':
+            if (dragOn.pad || dragOn.centerX) break;
+            setFieldCenter(v, centerY); paintField();
+            break;
+        case 'centerY':
+            if (dragOn.pad || dragOn.centerY) break;
+            setFieldCenter(centerX, v); paintField();
+            break;
+        case 'window':
+            winIdx = clamp(Math.round(v), 1, 5);
+            paintWindow();
+            break;
+        case 'minWet':
+            if (dragOn.wet === 'min') break;
+            minWet = clamp(v, 0, 1); paintWet();
+            break;
+        case 'maxWet':
+            if (dragOn.wet === 'max') break;
+            maxWet = clamp(v, 0, 1); paintWet();
+            break;
+        case 'outFL':
+            lvlL = v; setMeter('mtrFL', 'capFL', v); updateGlow(Math.max(lvlL, lvlRL), Math.max(lvlR, lvlRR));
+            break;
+        case 'outFR':
+            lvlR = v; setMeter('mtrFR', 'capFR', v); updateGlow(Math.max(lvlL, lvlRL), Math.max(lvlR, lvlRR));
+            break;
+        case 'outRL':
+            lvlRL = v; setMeter('mtrRL', 'capRL', v); updateGlow(lvlL, lvlRL);
+            break;
+        case 'outRR':
+            lvlRR = v; setMeter('mtrRR', 'capRR', v); updateGlow(lvlL, lvlRR);
+            break;
+        default:
+            if (P[id]) {
+                if (dragOn[id]) break;
+                setParam(id, clamp(v, P[id].min, P[id].max));
+            }
+    }
+}
+
+Cabbage.addMessageListener(msg => {
+    const data = msg.data ?? msg;
+    if (msg.command === 'widgetUpdate') {
+        const id = data.id ?? data.channel;
+        const v = data.value !== undefined ? data.value : Cabbage.extractValue(data, id);
+        applyValue(id, v);
+    } else if (msg.command === 'batchWidgetUpdate') {
+        for (const w of msg.widgets ?? []) {
+            const e = w.data ?? w;
+            applyValue(e.id, Cabbage.extractValue(e, e.id));
+        }
+    } else if (msg.command === 'resizeResponse') {
+        if (hostResize !== 'accepted') {
+            const d = msg.data ?? msg;
+            hostResize = d.accepted ? 'accepted' : 'rejected';
+            if (hostResize === 'accepted') { reqViewport = 0; clearTimeout(reqTimer); }
+            paintZoomBadge();
+        }
+    } else if (msg.command === 'parameterChange') {
+        const pm = msg.data ?? msg;
+        const id = typeof pm.channel === 'string' ? pm.channel : PARAM_IDX[pm.paramIdx];
+        if (id) applyValue(id, pm.value);
+    }
+});
+
+/* ---------------- 窗口缩放（§6.3 / §6.6 / §6.7） ---------------- */
+const CANVAS = { w: 620, h: 820 };
+const BASE = 1;
+const MIN_SCALE = 0.75 * BASE;
+
+const MAX_FILL = 0.94;
+const screenW = () => (screen.availWidth || screen.width || 0);
+const screenH = () => (screen.availHeight || screen.height || 0);
+
+function maxScale() {
+    const sw = screenW(), sh = screenH();
+    const byW = sw ? sw / CANVAS.w : 3;
+    const byH = sh ? sh / CANVAS.h : 3;
+    return Math.max(MIN_SCALE, Math.min(12, Math.min(byW, byH) * MAX_FILL));
+}
+
+const viewScale = () => Math.min(innerWidth / CANVAS.w, innerHeight / CANVAS.h);
+
+let hostResize = 'unknown';
+let reqViewport = 0;
+let reqTimer = 0;
+let zoomDrag = null;
+let holdScale = null;
+
+const yOf = e => (typeof e.screenY === 'number' && e.screenY !== 0) ? e.screenY : e.clientY;
+let pendingScale = null;
+let rafId = 0;
+let lastSent = 0;
+let dragEndedAt = 0;
+
+function paintZoomBadge(override) {
+    const s = override != null ? override : viewScale() / BASE;
+    document.body.style.setProperty('--zoom', (s * BASE).toFixed(4));
+    $('zpct').textContent = Math.round(s * 100) + '%';
+    $('zoomer').dataset.host = hostResize;
+}
+
+function fitToViewport() {
+    if (reqViewport && (innerWidth !== reqViewport.w || innerHeight !== reqViewport.h)) {
+        reqViewport = 0;
+        clearTimeout(reqTimer);
+        hostResize = 'accepted';
+    }
+    if (holdScale != null && Math.abs(viewScale() / BASE - holdScale) < 0.01) holdScale = null;
+    paintZoomBadge(zoomDrag && zoomDrag.moved ? zoomDrag.target : (holdScale ?? undefined));
+}
+
+function requestWindowScale(scale) {
+    let w = Math.round(CANVAS.w * scale * BASE);
+    let h = Math.round(CANVAS.h * scale * BASE);
+    const limit = Math.floor(screenH() * MAX_FILL);
+    if (limit > 0 && h > limit) {
+        h = limit;
+        w = Math.round(h * CANVAS.w / CANVAS.h);
+    }
+    reqViewport = { w: innerWidth, h: innerHeight };
+    clearTimeout(reqTimer);
+    reqTimer = setTimeout(() => {
+        if (reqViewport) { reqViewport = 0; hostResize = 'rejected'; holdScale = null; paintZoomBadge(); }
+    }, 600);
+    Cabbage.requestResize(w, h, null);
+}
+
+function scheduleResizeRequest() {
+    if (rafId) return;
+    rafId = requestAnimationFrame(() => {
+        rafId = 0;
+        if (pendingScale == null) return;
+        if (lastSent && Math.abs(pendingScale - lastSent) < 0.004) return;
+        lastSent = pendingScale;
+        requestWindowScale(lastSent);
+    });
+}
+
+$('zoomer').addEventListener('pointerdown', e => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    $('zoomer').setPointerCapture(e.pointerId);
+    const s = viewScale() / BASE;
+    zoomDrag = {
+        anchorY: yOf(e), startScale: s, moved: false, target: s,
+        ceiling: Math.max(s, maxScale())
+    };
+    dragOn.zoom = true;
+    document.body.classList.add('dragging-zoom');
+});
+
+$('zoomer').addEventListener('pointermove', e => {
+    if (!zoomDrag) return;
+    const dy = yOf(e) - zoomDrag.anchorY;
+    if (!zoomDrag.moved && Math.abs(dy) < 2) return;
+    zoomDrag.moved = true;
+    e.preventDefault();
+    const raw = zoomDrag.startScale * Math.exp(dy / 220);
+    const target = Math.min(zoomDrag.ceiling, Math.max(MIN_SCALE, raw));
+    zoomDrag.target = target;
+    pendingScale = target;
+    paintZoomBadge(target);
+    scheduleResizeRequest();
+});
+
+function endZoomDrag(e) {
+    if (!zoomDrag) return;
+    const moved = zoomDrag.moved;
+    const finalScale = zoomDrag.target;
+    zoomDrag = null;
+    pendingScale = null;
+    dragOn.zoom = false;
+    document.body.classList.remove('dragging-zoom');
+    if (rafId) { cancelAnimationFrame(rafId); rafId = 0; }
+    try { $('zoomer').releasePointerCapture(e.pointerId); } catch (_) {}
+    if (moved) {
+        dragEndedAt = performance.now();
+        if (Math.abs(finalScale - lastSent) >= 0.004) {
+            lastSent = finalScale;
+            requestWindowScale(finalScale);
+        }
+        holdScale = finalScale;
+        paintZoomBadge(finalScale);
+        return;
+    }
+    paintZoomBadge();
+}
+$('zoomer').addEventListener('pointerup', endZoomDrag);
+$('zoomer').addEventListener('pointercancel', endZoomDrag);
+
+$('zoomer').addEventListener('dblclick', e => {
+    e.preventDefault();
+    if (performance.now() - dragEndedAt < 400) return;
+    lastSent = BASE;
+    holdScale = BASE;
+    requestWindowScale(BASE);
+    paintZoomBadge(BASE);
+});
+
+function initZoom() {
+    paintZoomBadge();
+    lastSent = viewScale() / BASE;
+    new ResizeObserver(fitToViewport).observe(document.documentElement);
+    addEventListener('resize', fitToViewport);
+}
+
+initZoom();
+
+/* ---------------- 启动 ----------------
+   控件顺序 = DSP 信号流（§6.1 规则 0）：
+   密度/步长 → 场域半径 → 滤波范围 → 颗粒（尺寸/延迟/反向）→ 窗函数 → 空间 → 主输出 */
+const SECTIONS = {
+    grid1: [['Dens', 'Density'], ['step', 'Step Size'],
+            ['radius', 'Field Radius'], ['rangeMin', 'Cutoff Min'], ['rangeMax', 'Cutoff Max']],
+    grid2: [['GSize', 'Grain Size'], ['DlyMax', 'Max Delay'], ['reverse', 'Reverse Prob']],
+    grid4: [['roomSize', 'Room Size'], ['cutoff', 'Damping']],
+    grid5: [['drywet', 'Dry / Wet'], ['level', 'Master Gain']]
+};
+
+for (const [gid, rows] of Object.entries(SECTIONS)) {
+    const g = $(gid);
+    for (const [key, label] of rows) g.appendChild(makeFaderRow(key, label));
+}
+
+bindAxis('x');
+bindAxis('y');
+
+bindThumb('thumbMin', 'min');
+bindThumb('thumbMax', 'max');
+bindWetField('wetMinOut', 'minWet');
+bindWetField('wetMaxOut', 'maxWet');
+
+paintXY();
+paintField();
+paintWindow();
+paintWet();
+/* 干声游标先不显示：等第一帧真的坐标到了再亮，
+   否则闲置时它会盖在中心准星上，看起来像中心点变白了 */
+for (const key of FADER_KEYS) paintFader(key);
+
+buildDbScales();
+setMeter('mtrFL', 'capFL', 0);
+setMeter('mtrFR', 'capFR', 0);
+setMeter('mtrRL', 'capRL', 0);
+setMeter('mtrRR', 'capRR', 0);
+updateGlow(0, 0);
+
+/* 拖动期间禁止原生选中/拖影；输入框必须放行 */
+for (const ev of ['selectstart', 'dragstart']) {
+    document.addEventListener(ev, e => {
+        if (e.target && e.target.closest && e.target.closest('input')) return;
+        if (Object.values(dragOn).some(Boolean)) e.preventDefault();
+    });
+}
+
+Cabbage.sendCustomCommand('cabbageIsReadyToLoad', null);
+
+/* ---------------- 手势控制 ----------------
+   手往右 = centerX 变大,手往上 = centerY 变大;直接驱动场域中心。
+   手动拖 pad / 推子时让位,松手后手势接手。 */
+import('./gesture-ui.js').then(({ attachGestureControl }) => {
+    attachGestureControl({
+        channels: { x: 'centerX', y: 'centerY' },
+        read: () => ({ x: centerX, y: centerY }),
+        write: (x, y) => {
+            setFieldCenter(x, y);
+            paintField();
+        },
+        send: (id, v, g) => Cabbage.sendControlData({ channel: id, value: v, gesture: g }, null),
+        blocked: () => Object.values(dragOn).some(Boolean) || padDrag !== null,
+    });
+}).catch(e => console.warn('Cabbage: 手势模块不可用 —', e));
+/* ---------------- 内置使用手册 ----------------
+   顶栏 ? 在 iframe 里打开 help.html。只用内嵌:WebView 里 window.open 是死按钮。 */
+import('./help-ui.js').then(({ attachHelp }) => attachHelp())
+    .catch(e => console.warn('Cabbage: 手册模块不可用 —', e));
+
+/* ===== 圆盘模型（Ambi 声场是圆盘，方形四角在盘外）=====
+   画盘边 + 盘外斜纹，并把坐标钳制到盘内，与 DSP 的距离截断保持一致。 */
+(function markDisc() {
+    const svg = document.querySelector('#scene');
+    if (!svg) return;
+    const NS = 'http://www.w3.org/2000/svg';
+    const CXv = 270, CYv = 241, R = 165;
+    let defs = svg.querySelector('defs');
+    if (!defs) {
+        defs = document.createElementNS(NS, 'defs');
+        svg.insertBefore(defs, svg.firstChild);
+    }
+    if (!svg.querySelector('#hatch')) {
+        const pat = document.createElementNS(NS, 'pattern');
+        pat.setAttribute('id', 'hatch');
+        pat.setAttribute('width', '7');
+        pat.setAttribute('height', '7');
+        pat.setAttribute('patternUnits', 'userSpaceOnUse');
+        pat.setAttribute('patternTransform', 'rotate(45)');
+        const ln = document.createElementNS(NS, 'line');
+        ln.setAttribute('x1', '0'); ln.setAttribute('y1', '0');
+        ln.setAttribute('x2', '0'); ln.setAttribute('y2', '7');
+        ln.setAttribute('stroke', 'rgba(255,255,255,.085)');
+        ln.setAttribute('stroke-width', '1');
+        pat.appendChild(ln);
+        defs.appendChild(pat);
+    }
+    const g = document.createElementNS(NS, 'g');
+    const dead = document.createElementNS(NS, 'path');
+    dead.setAttribute('fill', 'url(#hatch)');
+    dead.setAttribute('fill-rule', 'evenodd');
+    dead.setAttribute('d',
+        'M' + (CXv - R) + ' ' + (CYv - R) + 'H' + (CXv + R) +
+        'V' + (CYv + R) + 'H' + (CXv - R) + 'Z ' +
+        'M' + (CXv - R) + ' ' + CYv + 'A' + R + ' ' + R + ' 0 1 0 ' +
+        (CXv + R) + ' ' + CYv + 'A' + R + ' ' + R + ' 0 1 0 ' +
+        (CXv - R) + ' ' + CYv + 'Z');
+    const disc = document.createElementNS(NS, 'circle');
+    disc.setAttribute('cx', CXv);
+    disc.setAttribute('cy', CYv);
+    disc.setAttribute('r', R);
+    disc.setAttribute('fill', 'none');
+    disc.setAttribute('stroke', 'rgba(255,255,255,.30)');
+    disc.setAttribute('stroke-width', '1');
+    g.appendChild(dead);
+    g.appendChild(disc);
+    /* 插入到 pad 底板之后、参考圈之前，否则会被不透明的 .padfill 盖住 */
+    const fill = svg.querySelector('.padfill');
+    if (fill && fill.nextSibling) svg.insertBefore(g, fill.nextSibling);
+    else if (fill) svg.appendChild(g);
+    else svg.insertBefore(g, defs.nextSibling);
+})();
+</script>
+</body>
+</html>

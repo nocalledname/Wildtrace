@@ -1,0 +1,1848 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Cab3-HRTF-Loom</title>
+<style>
+    :root {
+        --bg: #050302;
+        --ink: #f4ead7;
+        --gold: #ffc24b;
+        --gold-soft: rgba(255, 194, 75, .30);
+        --ember: #ff5f3a;
+        --thread: rgba(255, 194, 75, .30);
+        --dim: rgba(244, 234, 215, .42);
+        --faint: rgba(244, 234, 215, .14);
+        --mono: "SF Mono", ui-monospace, "JetBrains Mono", Menlo, Consolas, monospace;
+        --lvl: 0;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    /* html/body 只做视口容器；.canvas 是 620x700 的设计稿，整体靠 --zoom 缩放。
+       任何滚动都会让指针坐标与元素错位。 */
+    html, body {
+        width: 100%;
+        height: 100%;
+        overflow: hidden;
+        background: var(--bg);
+    }
+
+    body {
+        --zoom: 1;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        position: relative;
+    }
+
+    .canvas {
+        width: 620px;
+        height: 700px;
+        flex: none;
+        transform: scale(var(--zoom));
+        transform-origin: center center;
+        position: relative;
+        overflow: hidden;
+        color: var(--ink);
+        font-family: -apple-system, "Helvetica Neue", "PingFang SC", Arial, sans-serif;
+        font-size: 10px;
+        user-select: none;
+        -webkit-user-select: none;
+        -webkit-touch-callout: none;
+        background:
+            radial-gradient(ellipse 90% 60% at 50% 24%, #171009 0%, #0a0705 52%, #050302 100%);
+    }
+
+    /* ---------------- 场景 ---------------- */
+    #scene {
+        position: absolute;
+        left: 0; top: 0;
+        width: 620px; height: 450px;
+        display: block;
+    }
+
+    .hdr {
+        position: absolute;
+        left: 20px; right: 20px; top: 15px;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        pointer-events: none;
+        z-index: 4;
+    }
+    .hdr .mark { display: block; width: 13px; height: 13px; }
+    .hdr .mark .ring { fill: none; stroke: rgba(255, 194, 75, .55); stroke-width: 1; }
+    .hdr .mark .core { fill: var(--ember); }
+    .hdr h1 {
+        font-size: 13px;
+        font-weight: 600;
+        letter-spacing: .5em;
+        line-height: 1;
+    }
+    .hdr .sub {
+        font-family: var(--mono);
+        font-size: 7px;
+        letter-spacing: .26em;
+        text-transform: uppercase;
+        color: rgba(255, 194, 75, .48);
+        padding-top: 2px;
+    }
+    .hdr .tag {
+        margin-left: auto;
+        font-family: var(--mono);
+        font-size: 7px;
+        letter-spacing: .18em;
+        color: rgba(255, 194, 75, .58);
+        white-space: nowrap;
+    }
+
+    /* ---------------- 电平表（dB） ---------------- */
+    .metercol {
+        position: absolute;
+        top: 104px;
+        display: flex;
+        flex-direction: column;
+        gap: 5px;
+        z-index: 4;
+        pointer-events: none;
+    }
+    .metercol.l { left: 14px; align-items: flex-start; }
+    .metercol.r { right: 14px; align-items: flex-end; }
+    .metercol > span {
+        height: 8px;
+        font-family: var(--mono);
+        font-size: 6.5px;
+        line-height: 8px;
+        letter-spacing: .18em;
+        color: rgba(255, 194, 75, .40);
+    }
+    .meterbody { display: flex; align-items: stretch; gap: 3px; }
+    .meterbody.mirror { flex-direction: row-reverse; }
+
+    .bar { position: relative; width: 10px; height: 148px; flex: none; }
+    .bar::before, .bar::after {
+        content: "";
+        position: absolute;
+        top: 0; bottom: 0;
+        width: 1px;
+        background: rgba(255, 194, 75, .12);
+    }
+    .bar::before { left: 0; }
+    .bar::after { right: 0; }
+    .bar i {
+        position: absolute;
+        left: 1px; right: 1px; bottom: 0;
+        height: 100%;
+        transform-origin: bottom center;
+        transform: scaleY(0);
+        background: linear-gradient(to top,
+            rgba(255, 95, 58, .92) 0%,
+            rgba(255, 140, 70, .72) 46%,
+            rgba(255, 194, 75, .84) 100%);
+        transition: transform .05s linear;
+        will-change: transform;
+    }
+    .bar b {
+        position: absolute;
+        left: 0; right: 0;
+        height: 1px;
+        bottom: 0;
+        background: rgba(255, 230, 170, .95);
+        transition: transform .05s linear, opacity .12s linear;
+        opacity: 0;
+        will-change: transform;
+    }
+
+    .dbscale { position: relative; width: 24px; height: 148px; flex: none; }
+    .dbscale .t { position: absolute; left: 0; right: 0; height: 0; }
+    .dbscale .t::before {
+        content: "";
+        position: absolute;
+        left: 0; top: 0;
+        width: 3px; height: 1px;
+        background: rgba(255, 194, 75, .28);
+    }
+    .dbscale .t.major::before { width: 5px; background: rgba(255, 194, 75, .54); }
+    .dbscale .t .n {
+        position: absolute;
+        right: 0; top: -3.4px;
+        font-family: var(--mono);
+        font-size: 6px; line-height: 1;
+        color: rgba(255, 194, 75, .38);
+    }
+    .dbscale .t.major .n { color: rgba(255, 194, 75, .62); }
+    .dbscale .t.zero .n { color: rgba(255, 236, 170, .88); }
+    .meterbody.mirror .dbscale .t::before { left: auto; right: 0; }
+    .meterbody.mirror .dbscale .t .n { right: auto; left: 0; }
+
+    /* ---------------- 控制台 ---------------- */
+    .deck {
+        position: absolute;
+        left: 0; right: 0; bottom: 0;
+        height: 250px;
+        padding: 12px 46px 8px 20px;
+        display: flex;
+        flex-direction: column;
+        background:
+            linear-gradient(to bottom, rgba(5, 3, 2, 0) 0%, rgba(5, 3, 2, .78) 10%, #070503 40%),
+            #070503;
+        border-top: 1px solid rgba(255, 194, 75, .12);
+        z-index: 6;
+    }
+
+    .grow { display: flex; align-items: flex-start; gap: 18px; }
+    .grp { flex: none; }
+    .gt {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        height: 13px;
+        margin-bottom: 3px;
+        font-family: var(--mono);
+        font-size: 7px;
+        letter-spacing: .24em;
+        text-transform: uppercase;
+        color: rgba(255, 194, 75, .52);
+    }
+    .gt b {
+        font-weight: 400;
+        color: rgba(255, 194, 75, .88);
+        letter-spacing: .08em;
+    }
+    .gt::after {
+        content: "";
+        width: 20px;
+        height: 1px;
+        background: linear-gradient(to right, rgba(255, 194, 75, .34), transparent);
+    }
+    .vsep {
+        width: 1px;
+        align-self: stretch;
+        margin: 4px 3px 0;
+        background: linear-gradient(to bottom, transparent, rgba(255, 194, 75, .18), transparent);
+    }
+    .krow { display: flex; gap: 6px; }
+
+    .row2 {
+        display: flex;
+        align-items: flex-start;
+        gap: 26px;
+        margin-top: 9px;
+    }
+
+    /* ---------------- 旋钮 ---------------- */
+    .knob {
+        position: relative;
+        width: 68px;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        cursor: ns-resize;
+        touch-action: none;
+        padding-top: 1px;
+    }
+    .knob svg { display: block; width: 50px; height: 50px; overflow: visible; }
+    .knob .plate {
+        fill: rgba(18, 12, 6, .92);
+        stroke: rgba(255, 194, 75, .16);
+        stroke-width: 1;
+        transition: stroke .16s ease;
+    }
+    .knob .gauge {
+        fill: none;
+        stroke: rgba(244, 234, 215, .11);
+        stroke-width: 2.2;
+        stroke-linecap: round;
+    }
+    .knob .arc {
+        fill: none;
+        stroke: var(--gold);
+        stroke-width: 2.2;
+        stroke-linecap: round;
+        filter: drop-shadow(0 0 3px rgba(255, 194, 75, .55));
+        transition: stroke-dasharray .05s linear;
+    }
+    .knob .tick { stroke: rgba(244, 234, 215, .14); stroke-width: 1; }
+    .knob .tick.major { stroke: rgba(255, 194, 75, .44); }
+    .knob:hover .plate { stroke: rgba(255, 194, 75, .44); }
+
+    .knob .kval {
+        position: absolute;
+        left: 50%;
+        top: 25px;
+        transform: translate(-50%, -50%);
+        width: 52px;
+        height: 15px;
+        padding: 0;
+        border: 0;
+        border-radius: 2px;
+        background: transparent;
+        color: var(--gold);
+        font-family: var(--mono);
+        font-size: 9.5px;
+        font-weight: 300;
+        text-align: center;
+        outline: none;
+        pointer-events: none;
+        -webkit-user-select: text;
+        user-select: text;
+        -webkit-appearance: none;
+        appearance: none;
+    }
+    .knob.editing { cursor: text; }
+    .knob.editing .kval {
+        pointer-events: auto;
+        background: rgba(255, 194, 75, .12);
+        box-shadow: 0 0 0 1px rgba(255, 194, 75, .58);
+    }
+    .klab {
+        margin-top: 3px;
+        font-family: var(--mono);
+        font-size: 7px;
+        line-height: 9px;
+        letter-spacing: .18em;
+        color: rgba(244, 234, 215, .52);
+        text-transform: uppercase;
+        white-space: nowrap;
+    }
+
+    /* ---------------- 湿声双滑块 ---------------- */
+    .wetbox { flex: 1; min-width: 0; padding-top: 15px; }
+    .wt {
+        display: flex;
+        justify-content: space-between;
+        align-items: baseline;
+        font-family: var(--mono);
+        font-size: 7px;
+        letter-spacing: .20em;
+        text-transform: uppercase;
+        color: rgba(255, 194, 75, .50);
+        margin-bottom: 10px;
+    }
+    .wt span:last-child { color: rgba(244, 234, 215, .28); letter-spacing: .14em; }
+
+    .dual { position: relative; width: 100%; height: 20px; }
+    .dual .ticks {
+        position: absolute;
+        left: 0; right: 0; top: 50%;
+        height: 7px;
+        margin-top: -3.5px;
+        background: repeating-linear-gradient(90deg,
+            rgba(255, 194, 75, .12) 0 1px, transparent 1px 10%);
+        pointer-events: none;
+    }
+    .dual .track {
+        position: absolute;
+        left: 0; right: 0; top: 50%;
+        height: 1px;
+        margin-top: -0.5px;
+        background: rgba(255, 194, 75, .18);
+    }
+    .dual .fill {
+        position: absolute;
+        top: 50%;
+        height: 1px;
+        margin-top: -0.5px;
+        background: var(--ember);
+        box-shadow: 0 0 8px rgba(255, 95, 58, .5);
+    }
+    .dual .thumb {
+        position: absolute;
+        top: 50%;
+        width: 8px; height: 8px;
+        margin-top: -4px;
+        margin-left: -4px;
+        border-radius: 50%;
+        background: #0a0604;
+        border: 1px solid rgba(255, 194, 75, .58);
+        cursor: ew-resize;
+        touch-action: none;
+        transition: border-color .14s ease, box-shadow .14s ease, transform .1s ease;
+    }
+    .dual .thumb:hover {
+        border-color: var(--ember);
+        box-shadow: 0 0 0 3px rgba(255, 95, 58, .10), 0 0 10px rgba(255, 95, 58, .40);
+    }
+    .dual .thumb:active { transform: scale(1.14); }
+
+    .vals {
+        display: flex;
+        justify-content: space-between;
+        margin-top: 8px;
+        font-family: var(--mono);
+        font-size: 7.5px;
+        letter-spacing: .06em;
+        color: var(--gold);
+    }
+    .vals input {
+        width: 46px;
+        padding: 1px 3px;
+        border: 0;
+        border-radius: 2px;
+        background: transparent;
+        color: var(--gold);
+        font: inherit;
+        letter-spacing: inherit;
+        text-align: left;
+        outline: none;
+        -webkit-user-select: text;
+        user-select: text;
+        -webkit-appearance: none;
+        appearance: none;
+    }
+    .vals input:last-child { text-align: right; }
+    .vals input:focus {
+        background: rgba(255, 194, 75, .12);
+        box-shadow: 0 0 0 1px rgba(255, 194, 75, .58);
+    }
+
+    /* ---------------- 底栏 ---------------- */
+    .foot {
+        margin-top: auto;
+        padding-top: 6px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        font-family: var(--mono);
+        font-size: 6.5px;
+        letter-spacing: .26em;
+        text-transform: uppercase;
+        color: rgba(255, 194, 75, .28);
+    }
+    .foot .cell { letter-spacing: .16em; color: rgba(255, 194, 75, .46); }
+
+    /* ---------------- 缩放三角（右下角） ---------------- */
+    .zoomer {
+        position: absolute;
+        right: 0; bottom: 0;
+        width: 34px; height: 34px;
+        padding: 0;
+        border: 0;
+        background: none;
+        cursor: ns-resize;
+        display: flex;
+        align-items: flex-end;
+        justify-content: flex-end;
+        z-index: 20;
+    }
+    .zoomer svg { display: block; width: 14px; height: 14px; margin: 0 4px 4px 0; }
+    .zoomer path { fill: rgba(255, 194, 75, .38); transition: fill .14s ease; }
+    .zoomer:hover path { fill: rgba(255, 194, 75, .94); }
+    .zoomer[data-host="accepted"] path { fill: rgba(255, 194, 75, .62); }
+    .zoomer[data-host="rejected"] path {
+        fill: none;
+        stroke: rgba(255, 194, 75, .48);
+        stroke-width: 1.1;
+    }
+    .zoomer[data-host="rejected"]:hover path { stroke: rgba(255, 194, 75, .92); fill: none; }
+    .zoomer:active path { fill: var(--ember); }
+    .zoomer .zpct {
+        position: absolute;
+        right: 21px; bottom: 4px;
+        font-family: var(--mono);
+        font-size: 6.5px;
+        letter-spacing: .10em;
+        color: rgba(255, 194, 75, .62);
+        opacity: 0;
+        transition: opacity .14s ease;
+        pointer-events: none;
+        white-space: nowrap;
+    }
+    .zoomer:hover .zpct { opacity: 1; }
+    body.dragging-zoom .zoomer .zpct { opacity: 1; }
+
+    /* ---------------- 场景元素 ---------------- */
+    .thread { stroke: rgba(255, 194, 75, .12); stroke-width: .7; }
+    .thread.major { stroke: rgba(255, 194, 75, .22); }
+    .route {
+        fill: none;
+        stroke: rgba(255, 95, 58, .46);
+        stroke-width: 1;
+        stroke-dasharray: 4 7;
+        animation: flow 1.4s linear infinite;
+    }
+    @keyframes flow { to { stroke-dashoffset: -11; } }
+    .node { fill: rgba(255, 194, 75, .46); }
+    .node.end { fill: rgba(255, 194, 75, .24); }
+    .frame { fill: none; stroke: rgba(255, 194, 75, .30); stroke-width: 1; }
+    .padfill { fill: rgba(255, 194, 75, .016); }
+    /* 当前交织点：固定尺寸的锁环，不代表格子边界，所以不随行列数缩放 */
+    .lock-box { fill: rgba(255, 95, 58, .10); stroke: rgba(255, 95, 58, .52); stroke-width: 1; }
+    .lock-ring { fill: none; stroke: rgba(255, 226, 172, .82); stroke-width: 1; }
+    .lock-core { fill: rgba(255, 240, 210, .95); }
+    .sat-shadow { fill: rgba(5, 3, 2, .82); }
+    .sh-body {
+        fill: url(#shGrad);
+        stroke: rgba(255, 230, 180, .75);
+        stroke-width: .7;
+        filter: drop-shadow(0 0 4px rgba(255, 95, 58, .75));
+    }
+    .sh-core { fill: #fff3d6; }
+</style>
+</head>
+<body>
+
+<div class="canvas" id="canvas">
+
+    <svg id="scene" viewBox="0 0 620 450" aria-hidden="true">
+        <defs>
+            <radialGradient id="bgGrad" cx="50%" cy="42%" r="74%">
+                <stop offset="0%" stop-color="#191109"/>
+                <stop offset="54%" stop-color="#0c0806"/>
+                <stop offset="100%" stop-color="#050302"/>
+            </radialGradient>
+
+            <pattern id="weave" width="7" height="7" patternUnits="userSpaceOnUse">
+                <path d="M0 0H7M0 0V7" stroke="rgba(255,194,75,.035)" stroke-width=".7"/>
+            </pattern>
+
+            <radialGradient id="vign" cx="50%" cy="44%" r="66%">
+                <stop offset="0%" stop-color="#000" stop-opacity="0"/>
+                <stop offset="72%" stop-color="#000" stop-opacity=".18"/>
+                <stop offset="100%" stop-color="#000" stop-opacity=".66"/>
+            </radialGradient>
+
+            <linearGradient id="fadeGrad" gradientUnits="userSpaceOnUse" x1="0" y1="392" x2="0" y2="450">
+                <stop offset="0%" stop-color="#070503" stop-opacity="0"/>
+                <stop offset="100%" stop-color="#070503" stop-opacity="1"/>
+            </linearGradient>
+
+            <radialGradient id="lvlGrad" cx="50%" cy="50%" r="50%">
+                <stop offset="0%" stop-color="#ff8a3c" stop-opacity=".26"/>
+                <stop offset="58%" stop-color="#ff5f3a" stop-opacity=".08"/>
+                <stop offset="100%" stop-color="#ff5f3a" stop-opacity="0"/>
+            </radialGradient>
+
+            <radialGradient id="shGlow" cx="50%" cy="50%" r="50%">
+                <stop offset="0%" stop-color="#ff7a4a" stop-opacity=".34"/>
+                <stop offset="46%" stop-color="#ff5f3a" stop-opacity=".12"/>
+                <stop offset="100%" stop-color="#ff5f3a" stop-opacity="0"/>
+            </radialGradient>
+
+            <linearGradient id="shGrad" x1="0" y1="0" x2="1" y2="0">
+                <stop offset="0%" stop-color="#ff9a52"/>
+                <stop offset="55%" stop-color="#ffd79a"/>
+                <stop offset="100%" stop-color="#fff6e2"/>
+            </linearGradient>
+
+            <!-- 拖尾渐变：向量每帧由 JS 从尾端指到头端 -->
+            <linearGradient id="trailGrad" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="10" y2="0">
+                <stop offset="0%" stop-color="#ffe9bd" stop-opacity="0"/>
+                <stop offset="42%" stop-color="#ffe3b0" stop-opacity=".28"/>
+                <stop offset="76%" stop-color="#ffd98a" stop-opacity=".72"/>
+                <stop offset="100%" stop-color="#fffdf6" stop-opacity="1"/>
+            </linearGradient>
+
+            <!-- ★ region 必须用 userSpaceOnUse 的绝对范围，百分比会按包围盒算，
+                 细长拖尾的包围盒太窄，高斯模糊会被裁成方形。 -->
+            <filter id="trailBlurS" filterUnits="userSpaceOnUse"
+                    x="-40" y="-40" width="700" height="530">
+                <feGaussianBlur stdDeviation="2.2"/>
+            </filter>
+            <filter id="trailBlurL" filterUnits="userSpaceOnUse"
+                    x="-40" y="-40" width="700" height="530">
+                <feGaussianBlur stdDeviation="5.5"/>
+            </filter>
+
+            <!-- pad 裁剪区：坐标由 JS 按 PAD 常量写入，与 #frame 共用同一组数 -->
+            <clipPath id="padClip">
+                <rect id="padClipRect" x="145" y="58" width="330" height="330"/>
+            </clipPath>
+            <!-- 经/纬线头裁到圆盘内：稀疏织法仍能伸出框外，但绝不越出圆 -->
+            <clipPath id="discClip"><circle cx="310" cy="223" r="165"/></clipPath>
+        </defs>
+
+        <rect x="0" y="0" width="620" height="450" fill="url(#bgGrad)"/>
+        <rect x="0" y="0" width="620" height="450" fill="url(#weave)" opacity=".8"/>
+        <rect id="lvlWash" x="120" y="36" width="380" height="390"
+              fill="url(#lvlGrad)" opacity="0" pointer-events="none"/>
+
+        <g id="threads" clip-path="url(#discClip)" pointer-events="none"></g>
+        <rect class="padfill" id="padFill" pointer-events="none" x="145" y="58" width="330" height="330"/>
+        <rect class="frame" id="frame" pointer-events="none" x="145" y="58" width="330" height="330"/>
+        <path class="route" id="route" pointer-events="none" clip-path="url(#padClip)" d=""/>
+        <g id="nodes" pointer-events="none"></g>
+        <circle class="node" id="markStart" cx="0" cy="0" r="3" pointer-events="none"/>
+        <circle class="node end" id="markEnd" cx="0" cy="0" r="2" pointer-events="none"/>
+        <!-- 当前交织点：不裁剪，贴边时允许盖住框线，否则会被切成半块 -->
+        <g id="lock" opacity="0" pointer-events="none">
+            <rect class="lock-box" x="-9" y="-9" width="18" height="18" rx="2"/>
+            <circle class="lock-ring" r="5.6"/>
+            <circle class="lock-core" r="1.4"/>
+        </g>
+
+        <path id="trailShadow" fill="#050302" opacity="0" pointer-events="none" filter="url(#trailBlurS)"/>
+        <path id="trailGlow" fill="#ffab3c" opacity="0" pointer-events="none" filter="url(#trailBlurL)"/>
+        <path id="trailLine" fill="url(#trailGrad)" opacity="0" pointer-events="none"/>
+
+        <g id="shuttle" opacity="0" pointer-events="none">
+            <circle r="15" fill="url(#shGlow)"/>
+            <ellipse class="sat-shadow" cx="0" cy="1" rx="9" ry="4.6"/>
+            <path class="sh-body" d="M -8.5 0 Q -2.4 -3.6 8.5 0 Q -2.4 3.6 -8.5 0 Z"/>
+            <circle class="sh-core" r="1.5"/>
+        </g>
+
+        <rect x="0" y="392" width="620" height="58" fill="url(#fadeGrad)" pointer-events="none"/>
+        <rect x="0" y="0" width="620" height="450" fill="url(#vign)" pointer-events="none"/>
+    </svg>
+
+    <div class="hdr">
+        <svg class="mark" viewBox="0 0 16 16" fill="none" aria-hidden="true" style="width:13px;height:13px;flex:none;display:block">
+  <path d="M12.9 3.3H9.4C6.4 3.3 6.2 7.7 8.6 8C11 8.3 10.8 12.7 7.8 12.7H3.1" stroke="#ffc24b" stroke-width="1" stroke-linecap="round"/>
+  <circle cx="3.1" cy="12.7" r="1.7" fill="#ffc24b"/>
+</svg>
+        <h1>LOOM</h1>
+        <div class="sub">HRTF Binaural</div>
+        <div class="tag" id="pathTag">PATH 01 · 4 × 4</div>
+    </div>
+
+    <div class="metercol l">
+        <span>L</span>
+        <div class="meterbody">
+            <div class="bar"><i id="mtrL"></i><b id="capL"></b></div>
+            <div class="dbscale" id="scaleL"></div>
+        </div>
+    </div>
+    <div class="metercol r">
+        <span>R</span>
+        <div class="meterbody mirror">
+            <div class="bar"><i id="mtrR"></i><b id="capR"></b></div>
+            <div class="dbscale" id="scaleR"></div>
+        </div>
+    </div>
+
+    <div class="deck">
+
+        <div class="grow">
+            <div class="grp">
+                <div class="gt"><b>01</b><span>Matrix</span></div>
+                <div class="krow">
+                    <div class="knob" id="kRows">
+                        <svg viewBox="0 0 54 54">
+                            <circle class="plate" cx="27" cy="27" r="19"></circle>
+                            <g id="tRows"></g>
+                            <circle class="gauge" id="gRows" cx="27" cy="27" r="22" transform="rotate(135 27 27)"></circle>
+                            <circle class="arc" id="aRows" cx="27" cy="27" r="22" transform="rotate(135 27 27)"></circle>
+                        </svg>
+                        <input class="kval" id="vRows" type="text" inputmode="decimal" value="4" spellcheck="false" autocomplete="off">
+                        <div class="klab">Rows</div>
+                    </div>
+                    <div class="knob" id="kCols">
+                        <svg viewBox="0 0 54 54">
+                            <circle class="plate" cx="27" cy="27" r="19"></circle>
+                            <g id="tCols"></g>
+                            <circle class="gauge" id="gCols" cx="27" cy="27" r="22" transform="rotate(135 27 27)"></circle>
+                            <circle class="arc" id="aCols" cx="27" cy="27" r="22" transform="rotate(135 27 27)"></circle>
+                        </svg>
+                        <input class="kval" id="vCols" type="text" inputmode="decimal" value="4" spellcheck="false" autocomplete="off">
+                        <div class="klab">Cols</div>
+                    </div>
+                    <div class="knob" id="kPath">
+                        <svg viewBox="0 0 54 54">
+                            <circle class="plate" cx="27" cy="27" r="19"></circle>
+                            <g id="tPath"></g>
+                            <circle class="gauge" id="gPath" cx="27" cy="27" r="22" transform="rotate(135 27 27)"></circle>
+                            <circle class="arc" id="aPath" cx="27" cy="27" r="22" transform="rotate(135 27 27)"></circle>
+                        </svg>
+                        <input class="kval" id="vPath" type="text" inputmode="decimal" value="1" spellcheck="false" autocomplete="off">
+                        <div class="klab">Path</div>
+                    </div>
+                    <div class="knob" id="kSpeed">
+                        <svg viewBox="0 0 54 54">
+                            <circle class="plate" cx="27" cy="27" r="19"></circle>
+                            <g id="tSpeed"></g>
+                            <circle class="gauge" id="gSpeed" cx="27" cy="27" r="22" transform="rotate(135 27 27)"></circle>
+                            <circle class="arc" id="aSpeed" cx="27" cy="27" r="22" transform="rotate(135 27 27)"></circle>
+                        </svg>
+                        <input class="kval" id="vSpeed" type="text" inputmode="decimal" value="0.20" spellcheck="false" autocomplete="off">
+                        <div class="klab">Speed</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="vsep"></div>
+
+            <div class="grp">
+                <div class="gt"><b>02</b><span>Shuttle</span></div>
+                <div class="krow">
+                    <div class="knob" id="kGlide">
+                        <svg viewBox="0 0 54 54">
+                            <circle class="plate" cx="27" cy="27" r="19"></circle>
+                            <g id="tGlide"></g>
+                            <circle class="gauge" id="gGlide" cx="27" cy="27" r="22" transform="rotate(135 27 27)"></circle>
+                            <circle class="arc" id="aGlide" cx="27" cy="27" r="22" transform="rotate(135 27 27)"></circle>
+                        </svg>
+                        <input class="kval" id="vGlide" type="text" inputmode="decimal" value="0.030" spellcheck="false" autocomplete="off">
+                        <div class="klab">Glide</div>
+                    </div>
+                    <div class="knob" id="kTexture">
+                        <svg viewBox="0 0 54 54">
+                            <circle class="plate" cx="27" cy="27" r="19"></circle>
+                            <g id="tTexture"></g>
+                            <circle class="gauge" id="gTexture" cx="27" cy="27" r="22" transform="rotate(135 27 27)"></circle>
+                            <circle class="arc" id="aTexture" cx="27" cy="27" r="22" transform="rotate(135 27 27)"></circle>
+                        </svg>
+                        <input class="kval" id="vTexture" type="text" inputmode="decimal" value="0.60" spellcheck="false" autocomplete="off">
+                        <div class="klab">Texture</div>
+                    </div>
+                    <div class="knob" id="kWarp">
+                        <svg viewBox="0 0 54 54">
+                            <circle class="plate" cx="27" cy="27" r="19"></circle>
+                            <g id="tWarp"></g>
+                            <circle class="gauge" id="gWarp" cx="27" cy="27" r="22" transform="rotate(135 27 27)"></circle>
+                            <circle class="arc" id="aWarp" cx="27" cy="27" r="22" transform="rotate(135 27 27)"></circle>
+                        </svg>
+                        <input class="kval" id="vWarp" type="text" inputmode="decimal" value="5" spellcheck="false" autocomplete="off">
+                        <div class="klab">Warp:ms</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="row2">
+            <div class="grp">
+                <div class="gt"><b>03</b><span>Room</span></div>
+                <div class="krow">
+                    <div class="knob" id="kRoom">
+                        <svg viewBox="0 0 54 54">
+                            <circle class="plate" cx="27" cy="27" r="19"></circle>
+                            <g id="tRoom"></g>
+                            <circle class="gauge" id="gRoom" cx="27" cy="27" r="22" transform="rotate(135 27 27)"></circle>
+                            <circle class="arc" id="aRoom" cx="27" cy="27" r="22" transform="rotate(135 27 27)"></circle>
+                        </svg>
+                        <input class="kval" id="vRoom" type="text" inputmode="decimal" value="50" spellcheck="false" autocomplete="off">
+                        <div class="klab">Room</div>
+                    </div>
+                    <div class="knob" id="kDamp">
+                        <svg viewBox="0 0 54 54">
+                            <circle class="plate" cx="27" cy="27" r="19"></circle>
+                            <g id="tDamp"></g>
+                            <circle class="gauge" id="gDamp" cx="27" cy="27" r="22" transform="rotate(135 27 27)"></circle>
+                            <circle class="arc" id="aDamp" cx="27" cy="27" r="22" transform="rotate(135 27 27)"></circle>
+                        </svg>
+                        <input class="kval" id="vDamp" type="text" inputmode="decimal" value="16000" spellcheck="false" autocomplete="off">
+                        <div class="klab">Damp</div>
+                    </div>
+                    <div class="knob" id="kGain">
+                        <svg viewBox="0 0 54 54">
+                            <circle class="plate" cx="27" cy="27" r="19"></circle>
+                            <g id="tGain"></g>
+                            <circle class="gauge" id="gGain" cx="27" cy="27" r="22" transform="rotate(135 27 27)"></circle>
+                            <circle class="arc" id="aGain" cx="27" cy="27" r="22" transform="rotate(135 27 27)"></circle>
+                        </svg>
+                        <input class="kval" id="vGain" type="text" inputmode="decimal" value="2.00" spellcheck="false" autocomplete="off">
+                        <div class="klab">Master Gain</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="wetbox">
+                <div class="wt"><span>Wet Send · Min / Max</span><span>reverb</span></div>
+                <div class="dual" id="dual">
+                    <div class="ticks"></div>
+                    <div class="track"></div>
+                    <div class="fill" id="wetRange"></div>
+                    <div class="thumb" id="thumbMin"></div>
+                    <div class="thumb" id="thumbMax"></div>
+                </div>
+                <div class="vals">
+                    <input id="wetMinOut" type="text" inputmode="decimal" value="0.10" spellcheck="false" autocomplete="off">
+                    <input id="wetMaxOut" type="text" inputmode="decimal" value="0.30" spellcheck="false" autocomplete="off">
+                </div>
+            </div>
+        </div>
+
+        <div class="foot">
+            <span>Wildtrace Series</span>
+            <span class="cell" id="stepTag">NODE 01 / 16</span>
+        </div>
+
+    </div><!-- /.deck -->
+</div><!-- /.canvas -->
+
+<button class="zoomer" id="zoomer" type="button" aria-label="拖动缩放界面，双击回到 100%" title="往右下拖变大、往左上拖变小 · 双击回到 100%">
+    <span class="zpct" id="zpct">100%</span>
+    <svg viewBox="0 0 10 10" aria-hidden="true"><path d="M10 2.6 L2.6 10 L10 10 Z"/></svg>
+</button>
+
+<script type="module">
+import { Cabbage } from './cabbage/cabbage.js';
+
+const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
+const $ = id => document.getElementById(id);
+const NS = 'http://www.w3.org/2000/svg';
+
+/* ---------------- 参数表 ----------------
+   min / max / def 必须与 CSD 的 <Cabbage> 逐项一致（def = defaultValue，双击归位回到它）。
+   curve 是纯前端手感（§6.16），不写进 CSD：
+     curve = 0    线性
+     curve = k>0  指数：低端展开（小值占大半行程）
+     speed 0.1~10（100×）→ 4；glide 0.001~0.15（150×）→ 5；
+     warp 0~20 保留 0，低端给一点展开 → 2；room 10~100 → 1；cutoff 1000~16000 → 3。 */
+const P = {
+    rows:     { min: 1,    max: 10,    curve: 0, step: 1,      def: 4,    fmt: v => String(Math.round(v)) },
+    cols:     { min: 1,    max: 10,    curve: 0, step: 1,      def: 4,    fmt: v => String(Math.round(v)) },
+    path:     { min: 1,    max: 8,     curve: 0, step: 1,      def: 1,    fmt: v => String(Math.round(v)) },
+    speed:    { min: 0.1,  max: 10,    curve: 4, step: 0.01,   def: 0.2,  fmt: v => v < 1 ? v.toFixed(2) : v.toFixed(1) },
+    glide:    { min: 0.001,max: 0.15,  curve: 5, step: 0.001,  def: 0.03, fmt: v => v.toFixed(3) },
+    texture:  { min: 0,    max: 1,     curve: 0, step: 0.01,   def: 0.6,  fmt: v => v.toFixed(2) },
+    warp:     { min: 0,    max: 100,  curve: 4, step: 0.01,   def: 5,    fmt: v => String(Math.round(v)) },
+    roomSize: { min: 10,   max: 100,   curve: 1, step: 0.1,    def: 50,   fmt: v => String(Math.round(v)) },
+    cutoff:   { min: 1000, max: 16000, curve: 3, step: 1,      def: 16000, fmt: v => String(Math.round(v)) },
+    masterGain: { min: 0,  max: 8,     curve: 0, step: 0.01,   def: 2,     fmt: v => v.toFixed(2) }
+};
+
+const V = {
+    rows: 4, cols: 4, path: 1, speed: 0.2,
+    glide: 0.03, texture: 0.6, warp: 5,
+    roomSize: 50, cutoff: 16000, masterGain: 2
+};
+
+const WET_DEF = { minWet: 0.1, maxWet: 0.3 };
+let minWet = 0.1, maxWet = 0.3;
+
+/* 必须与 CSD 中 automatable:true widget 的书写顺序逐字一致 */
+const PARAM_IDX = ['rows', 'cols', 'path', 'speed', 'glide', 'texture', 'warp',
+                   'minWet', 'maxWet', 'roomSize', 'cutoff', 'masterGain'];
+
+const dragOn = {
+    rows: false, cols: false, path: false, speed: false,
+    glide: false, texture: false, warp: false,
+    roomSize: false, cutoff: false, masterGain: false, wet: null, zoom: false
+};
+
+/* ---------------- 旋钮映射曲线（§6.16） ---------------- */
+const KB = { r: 22, span: 0.75 };
+const CIRC = 2 * Math.PI * KB.r;
+const SPAN = CIRC * KB.span;
+
+const CURVE_MAX_K = 12;
+const curveToNorm = (f, k) => {
+    if (!k) return f;
+    const K = Math.min(Math.abs(k), CURVE_MAX_K), A = Math.exp(K) - 1;
+    return k > 0 ? (Math.exp(K * f) - 1) / A
+                 : 1 - (Math.exp(K * (1 - f)) - 1) / A;
+};
+const normToCurve = (n, k) => {
+    if (!k) return n;
+    const K = Math.min(Math.abs(k), CURVE_MAX_K), A = Math.exp(K) - 1;
+    return k > 0 ? Math.log(1 + n * A) / K
+                 : 1 - Math.log(1 + (1 - n) * A) / K;
+};
+
+const toFrac   = (v, p) => normToCurve(clamp((v - p.min) / (p.max - p.min), 0, 1), p.curve || 0);
+const fromFrac = (f, p) => p.min + (p.max - p.min) * curveToNorm(clamp(f, 0, 1), p.curve || 0);
+
+/* ---------------- 场景几何 ----------------
+   ★ pad 尺寸固定：后端送来的是「同一块 pad 里的位置」，
+     rows / cols 只改变织物密度（线的条数），不能改变 pad 的大小或位置。
+   与 Csound 的映射逐位对应：
+     x = col / (C-1)   y = row / (R-1)      （C 或 R 为 1 时除数为 1，即贴边）
+   pad 固定为 330×330 正方形，所有节点都落在框内，框本身永不重算。 */
+const PAD = { x: 145, y: 58, w: 330, h: 330 };
+
+/* 声场是圆盘，织机必须落在它的内接正方形里（与 CSD 的 kFigFit 同值）。
+   坐标向内收 1/√2 后，四个角的节点正好贴在圆上。
+   行列数只改密度，不改这个比例。 */
+const FIG_FIT = Math.SQRT1_2;            // 1/√2 ≈ 0.7071068
+let G = null;
+let seqCache = [];
+
+function gridGeom() {
+    const R = Math.round(V.rows), C = Math.round(V.cols);
+    const divX = C > 1 ? C - 1 : 1;
+    const divY = R > 1 ? R - 1 : 1;
+    const xs = [], ys = [];
+    for (let c = 0; c < C; c++) xs.push(PAD.x + (0.5 + (c / divX - 0.5) * FIG_FIT) * PAD.w);
+    for (let r = 0; r < R; r++) ys.push(PAD.y + (1 - (0.5 + (r / divY - 0.5) * FIG_FIT)) * PAD.h);
+    return { R, C, xs, ys, stepX: (PAD.w * FIG_FIT) / divX, stepY: (PAD.h * FIG_FIT) / divY };
+}
+
+/* 归一化矩阵坐标 → 屏幕坐标（Y 轴向上，与 Csound 一致） */
+function toScreen(x, y) {
+    /* 矩阵坐标 → 内接正方形 → 屏幕（Y 轴向上，与 Csound 一致） */
+    const fx = 0.5 + (clamp(x, 0, 1) - 0.5) * FIG_FIT;
+    const fy = 0.5 + (clamp(y, 0, 1) - 0.5) * FIG_FIT;
+    return { x: PAD.x + fx * PAD.w, y: PAD.y + (1 - fy) * PAD.h };
+}
+
+/* 与 Csound 的八极蛇形算法逐行对应，返回按遍历顺序排列的格子中心 */
+function cellSequence() {
+    const isVert = V.path >= 5;
+    const lc = isVert ? G.R : G.C;
+    const lr = isVert ? G.C : G.R;
+    const divX = lc > 1 ? lc - 1 : 1;
+    const divY = lr > 1 ? lr - 1 : 1;
+    const invX = (V.path === 3 || V.path === 4 || V.path === 7 || V.path === 8);
+    const invY = (V.path === 2 || V.path === 4 || V.path === 6 || V.path === 8);
+    const total = G.R * G.C;
+    const out = [];
+    for (let cellIdx = 0; cellIdx < total; cellIdx++) {
+        const row = Math.floor(cellIdx / lc);
+        let col = cellIdx % lc;
+        if (row % 2 === 1) col = lc - 1 - col;
+        const baseX = col / divX;
+        const baseY = row / divY;
+        const rawX = isVert ? baseY : baseX;
+        const rawY = isVert ? baseX : baseY;
+        out.push({
+            x: invX ? 1 - rawX : rawX,
+            y: invY ? 1 - rawY : rawY
+        });
+    }
+    return out;
+}
+
+const svgEl = (name, attrs) => {
+    const el = document.createElementNS(NS, name);
+    for (const k in attrs) el.setAttribute(k, attrs[k]);
+    return el;
+};
+
+/* 当前梭子位置（0~1），由 Csound 每帧推送 */
+let posX = 0, posY = 0;
+
+function rebuildGrid() {
+    G = gridGeom();
+    seqCache = cellSequence();
+    trail.length = 0;
+    hideTrail();
+
+    const threads = $('threads');
+    const nodes = $('nodes');
+    threads.innerHTML = '';
+    nodes.innerHTML = '';
+
+    /* 织机：经线（竖）= C 条，纬线（横）= R 条，全部落在固定 pad 的节点位置上。
+       两端留一小段「线头」伸出框外，纯粹是织机质感，长度不随行列数变。 */
+    const EXT = 22;
+    for (let c = 0; c < G.C; c++) {
+        const x = G.xs[c];
+        threads.appendChild(svgEl('line', {
+            class: (c === 0 || c === G.C - 1) ? 'thread major' : 'thread',
+            x1: x.toFixed(2), y1: (PAD.y - EXT).toFixed(2),
+            x2: x.toFixed(2), y2: (PAD.y + PAD.h + EXT).toFixed(2)
+        }));
+    }
+    for (let r = 0; r < G.R; r++) {
+        const y = G.ys[r];
+        threads.appendChild(svgEl('line', {
+            class: (r === 0 || r === G.R - 1) ? 'thread major' : 'thread',
+            x1: (PAD.x - EXT).toFixed(2), y1: y.toFixed(2),
+            x2: (PAD.x + PAD.w + EXT).toFixed(2), y2: y.toFixed(2)
+        }));
+    }
+
+    /* 交织点：C × R 个节点 */
+    for (let r = 0; r < G.R; r++) {
+        for (let c = 0; c < G.C; c++) {
+            nodes.appendChild(svgEl('circle', {
+                class: 'node',
+                cx: G.xs[c].toFixed(2),
+                cy: G.ys[r].toFixed(2),
+                r: 1.7
+            }));
+        }
+    }
+
+    /* 穿梭路径：按遍历顺序连节点，首尾各自加一点标记 */
+    const pts = seqCache.map(p => toScreen(p.x, p.y));
+    let d = '';
+    pts.forEach((p, i) => {
+        d += (i === 0 ? 'M' : 'L') + p.x.toFixed(2) + ' ' + p.y.toFixed(2);
+    });
+    $('route').setAttribute('d', d);
+
+    $('markStart').setAttribute('cx', pts[0].x.toFixed(2));
+    $('markStart').setAttribute('cy', pts[0].y.toFixed(2));
+    $('markEnd').setAttribute('cx', pts[pts.length - 1].x.toFixed(2));
+    $('markEnd').setAttribute('cy', pts[pts.length - 1].y.toFixed(2));
+
+    /* pad 与裁剪区共用同一组常量，避免两处各写一个数 */
+    /* 织机框收缩到内接正方形，与节点共用同一组几何 */
+    const FW = PAD.w * FIG_FIT, FH = PAD.h * FIG_FIT;
+    const f = $('frame');
+    f.setAttribute('x', (PAD.x + (PAD.w - FW) / 2).toFixed(2));
+    f.setAttribute('y', (PAD.y + (PAD.h - FH) / 2).toFixed(2));
+    f.setAttribute('width', FW.toFixed(2));
+    f.setAttribute('height', FH.toFixed(2));
+    const cr = $('padClipRect');
+    cr.setAttribute('x', PAD.x);
+    cr.setAttribute('y', PAD.y);
+    cr.setAttribute('width', PAD.w);
+    cr.setAttribute('height', PAD.h);
+    const pf = $('padFill');
+    pf.setAttribute('x', PAD.x);
+    pf.setAttribute('y', PAD.y);
+    pf.setAttribute('width', PAD.w);
+    pf.setAttribute('height', PAD.h);
+
+    paintTexture();
+    paintPathTag();
+    updateMarker(posX, posY, true);
+}
+
+function paintPathTag() {
+    const p = String(Math.round(V.path)).padStart(2, '0');
+    $('pathTag').textContent = 'PATH ' + p + ' · ' + G.R + ' × ' + G.C;
+}
+
+function paintTexture() {
+    const t = 0.30 + V.texture * 0.70;
+    $('threads').style.opacity = t.toFixed(3);
+    $('nodes').style.opacity = (0.55 + V.texture * 0.45).toFixed(3);
+}
+
+/* 高亮当前交织点（不是「格子」：梭子始终精确落在节点上） */
+function markNode(p) {
+    if (!seqCache.length) return;
+    let best = 0, bd = Infinity;
+    for (let i = 0; i < seqCache.length; i++) {
+        const q = toScreen(seqCache[i].x, seqCache[i].y);
+        const dx = q.x - p.x, dy = q.y - p.y;
+        const d = dx * dx + dy * dy;
+        if (d < bd) { bd = d; best = i; }
+    }
+    const q = toScreen(seqCache[best].x, seqCache[best].y);
+    const lock = $('lock');
+    lock.setAttribute('transform', 'translate(' + q.x.toFixed(2) + ' ' + q.y.toFixed(2) + ')');
+    lock.setAttribute('opacity', '1');
+    $('stepTag').textContent = 'NODE ' + String(best + 1).padStart(2, '0') + ' / ' + (G.R * G.C);
+}
+
+/* ---------------- 梭子 + 拖尾（§6.17） ---------------- */
+const trail = [];
+let shuttleAngle = 0;
+let lastMarker = null;
+
+function trailLength() {
+    return 42 + V.glide * 460;
+}
+
+function hideTrail() {
+    $('trailLine').setAttribute('opacity', '0');
+    $('trailGlow').setAttribute('opacity', '0');
+    $('trailShadow').setAttribute('opacity', '0');
+}
+
+function trimTrail() {
+    const lim = trailLength();
+    let acc = 0, i = trail.length - 1;
+    while (i > 0) {
+        acc += Math.hypot(trail[i].x - trail[i - 1].x, trail[i].y - trail[i - 1].y);
+        if (acc > lim) break;
+        i--;
+    }
+    if (i > 0) trail.splice(0, i);
+}
+
+function chaikin(pts, iters) {
+    let p = pts;
+    for (let k = 0; k < iters; k++) {
+        if (p.length < 3) return p;
+        const out = [p[0]];
+        for (let i = 0; i < p.length - 1; i++) {
+            const a = p[i], b = p[i + 1];
+            out.push({ x: a.x * 0.75 + b.x * 0.25, y: a.y * 0.75 + b.y * 0.25 });
+            out.push({ x: a.x * 0.25 + b.x * 0.75, y: a.y * 0.25 + b.y * 0.75 });
+        }
+        out.push(p[p.length - 1]);
+        p = out;
+    }
+    return p;
+}
+
+/* 沿平滑折线生成锥形带：尾端宽度 0，头端宽度 wMax */
+function ribbonPath(pts, wMax) {
+    const n = pts.length, f = v => v.toFixed(1);
+    if (n < 2) return '';
+    const left = [], right = [];
+    for (let i = 0; i < n; i++) {
+        const t = i / (n - 1);
+        const w = wMax * Math.pow(t, 1.15);
+        const a = pts[Math.max(0, i - 1)], b = pts[Math.min(n - 1, i + 1)];
+        let dx = b.x - a.x, dy = b.y - a.y;
+        const L = Math.hypot(dx, dy) || 1;
+        dx /= L; dy /= L;
+        left.push([pts[i].x - dy * w, pts[i].y + dx * w]);
+        right.push([pts[i].x + dy * w, pts[i].y - dx * w]);
+    }
+    let d = 'M' + f(left[0][0]) + ' ' + f(left[0][1]);
+    for (let i = 1; i < n; i++) d += ' L' + f(left[i][0]) + ' ' + f(left[i][1]);
+    for (let i = n - 1; i >= 0; i--) d += ' L' + f(right[i][0]) + ' ' + f(right[i][1]);
+    return d + ' Z';
+}
+
+function drawTrail() {
+    if (trail.length < 3) { hideTrail(); return; }
+    const pts = chaikin(trail, 2);
+    const w = 1.7 + V.texture * 1.1 + (V.warp / 20) * 0.5;
+
+    $('trailLine').setAttribute('d', ribbonPath(pts, w));
+    $('trailShadow').setAttribute('d', ribbonPath(pts, w * 1.4));
+    $('trailGlow').setAttribute('d', ribbonPath(pts, w * 2.2));
+
+    const a = trail[0], b = trail[trail.length - 1];
+    const grad = document.getElementById('trailGrad');
+    grad.setAttribute('x1', a.x.toFixed(1));
+    grad.setAttribute('y1', a.y.toFixed(1));
+    grad.setAttribute('x2', b.x.toFixed(1));
+    grad.setAttribute('y2', b.y.toFixed(1));
+
+    $('trailLine').setAttribute('opacity', '1');
+    $('trailShadow').setAttribute('opacity', '0.34');
+    $('trailGlow').setAttribute('opacity', (0.14 + V.texture * 0.10).toFixed(2));
+}
+
+function placeShuttle(p) {
+    if (trail.length >= 2) {
+        const a = trail[trail.length - 2], b = trail[trail.length - 1];
+        if (Math.hypot(b.x - a.x, b.y - a.y) > 0.05) {
+            const target = Math.atan2(b.y - a.y, b.x - a.x) * 180 / Math.PI;
+            const d = ((target - shuttleAngle + 540) % 360) - 180;
+            shuttleAngle += d * 0.3;
+        }
+    }
+    const sh = $('shuttle');
+    sh.setAttribute('transform', 'translate(' + p.x.toFixed(2) + ' ' + p.y.toFixed(2) + ') rotate(' + shuttleAngle.toFixed(1) + ')');
+    sh.setAttribute('opacity', '1');
+}
+
+/* loom_x / loom_y 是两条独立消息，必须合并到同一帧再画（§6.11）。
+   否则一帧会被拆成「新 X + 旧 Y」「新 X + 新 Y」两次绘制，
+   拖尾会多出一个直角拐点。 */
+let pendX = null, pendY = null, markerRaf = 0;
+
+function queueMarker(x, y) {
+    if (x != null) pendX = x;
+    if (y != null) pendY = y;
+    if (markerRaf) return;
+    markerRaf = requestAnimationFrame(() => {
+        markerRaf = 0;
+        if (pendX == null && pendY == null) return;
+        const nx = pendX == null ? posX : pendX;
+        const ny = pendY == null ? posY : pendY;
+        pendX = pendY = null;
+        updateMarker(nx, ny, false);
+    });
+}
+
+function updateMarker(x, y, force) {
+    posX = clamp(x, -0.5, 1.5);
+    posY = clamp(y, -0.5, 1.5);
+    const p = toScreen(posX, posY);
+
+    const moved = !lastMarker || Math.hypot(p.x - lastMarker.x, p.y - lastMarker.y) > 0.25;
+    if (force || moved) {
+        /* 速度很高时梭子会一帧跨过好几格；不斩断拖尾会连出一条横穿画布的长线 */
+        const prev = trail[trail.length - 1];
+        if (prev && Math.hypot(p.x - prev.x, p.y - prev.y) > Math.max(G.stepX * 2.2, 40)) {
+            trail.length = 0;
+        }
+        trail.push(p);
+        if (trail.length > 40) trail.shift();
+        trimTrail();
+        lastMarker = p;
+    }
+    drawTrail();
+    placeShuttle(p);
+    markNode(p);
+}
+
+/* ---------------- 旋钮 ---------------- */
+const KNOB_IDS = {
+    rows:     { arc: 'aRows',    txt: 'vRows' },
+    cols:     { arc: 'aCols',    txt: 'vCols' },
+    path:     { arc: 'aPath',    txt: 'vPath' },
+    speed:    { arc: 'aSpeed',   txt: 'vSpeed' },
+    glide:    { arc: 'aGlide',   txt: 'vGlide' },
+    texture:  { arc: 'aTexture', txt: 'vTexture' },
+    warp:     { arc: 'aWarp',    txt: 'vWarp' },
+    roomSize: { arc: 'aRoom',    txt: 'vRoom' },
+    cutoff:   { arc: 'aDamp',    txt: 'vDamp' },
+    masterGain: { arc: 'aGain',  txt: 'vGain' }
+};
+
+function buildTicks(groupId) {
+    const g = $(groupId);
+    for (let i = 0; i <= 20; i++) {
+        const f = i / 20;
+        const deg = 225 + f * 270;
+        const rad = deg * Math.PI / 180;
+        const major = i % 5 === 0;
+        const r1 = major ? 24.6 : 25.2;
+        const r2 = 27.4;
+        g.appendChild(svgEl('line', {
+            x1: (27 + r1 * Math.sin(rad)).toFixed(2),
+            y1: (27 - r1 * Math.cos(rad)).toFixed(2),
+            x2: (27 + r2 * Math.sin(rad)).toFixed(2),
+            y2: (27 - r2 * Math.cos(rad)).toFixed(2),
+            class: major ? 'tick major' : 'tick'
+        }));
+    }
+}
+
+function setParam(key, v) {
+    V[key] = v;
+    if (key === 'rows' || key === 'cols' || key === 'path') {
+        rebuildGrid();
+    } else if (key === 'texture') {
+        paintTexture();
+    } else if (key === 'glide') {
+        trimTrail();
+        drawTrail();
+    }
+}
+
+function paintKnob(key) {
+    const p = P[key];
+    const v = V[key];
+    const f = toFrac(clamp(v, p.min, p.max), p);
+    const ids = KNOB_IDS[key];
+    $(ids.arc).setAttribute('stroke-dasharray',
+        (f * SPAN).toFixed(2) + ' ' + CIRC.toFixed(2));
+    if (editing.key === key) return;
+    $(ids.txt).value = p.fmt(v);
+}
+
+/* ---------------- 数值编辑（§6.8） ---------------- */
+const DBL_MS = 350;
+const editing = { key: null, el: null, knob: null };
+let lastTapAt = 0, lastTapKey = null;
+
+function parseNum(raw, p) {
+    let t = String(raw).trim().toLowerCase().replace(/\s+/g, '');
+    if (!t) return NaN;
+    let mul = 1;
+    if (t.endsWith('k')) { mul = 1000; t = t.slice(0, -1); }
+    else if (t.endsWith('hz')) { t = t.slice(0, -2); }
+    const n = parseFloat(t);
+    if (!isFinite(n)) return NaN;
+    const v = n * mul;
+    return clamp(Math.round(v / p.step) * p.step, p.min, p.max);
+}
+
+function openEditor(key) {
+    const el = $(KNOB_IDS[key].txt);
+    if (editing.el === el) { el.select(); return; }
+    closeEditor(true);
+    editing.key = key;
+    editing.el = el;
+    editing.knob = el.closest('.knob');
+    if (editing.knob) editing.knob.classList.add('editing');
+    el.value = P[key].fmt(V[key]);
+    el.focus();
+    el.select();
+}
+
+function closeEditor(silent) {
+    const el = editing.el;
+    if (!el) return;
+    const wasKey = editing.key;
+    editing.key = null;
+    editing.el = null;
+    if (editing.knob) editing.knob.classList.remove('editing');
+    editing.knob = null;
+    if (!silent) {
+        el.blur();
+        if (wasKey) paintKnob(wasKey);
+    }
+}
+
+function commitEdit() {
+    const key = editing.key;
+    if (!key) return;
+    const el = editing.el;
+    const v = parseNum(el.value, P[key]);
+    closeEditor();
+    if (!isFinite(v)) { paintKnob(key); return; }
+    setParam(key, v);
+    paintKnob(key);
+    Cabbage.sendControlData({ channel: key, value: v, gesture: 'complete' }, null);
+}
+
+function resetKnob(key) {
+    const d = P[key].def;
+    setParam(key, d);
+    paintKnob(key);
+    Cabbage.sendControlData({ channel: key, value: d, gesture: 'complete' }, null);
+}
+
+function bindKnob(elId, key) {
+    const el = $(elId);
+    const p = P[key];
+    const txt = $(KNOB_IDS[key].txt);
+    let startY = 0, startX = 0, startF = 0, accF = 0, lastY = 0;
+    let dragging = false, active = false, onInput = false, moved = false;
+
+    el.addEventListener('pointerdown', e => {
+        if (e.button !== 0) return;
+        /* 点到另一个旋钮时，先把上一个正在编辑的值提交掉（拖拽会 preventDefault，不会触发 blur） */
+        if (editing.key && editing.key !== key) commitEdit();
+        active = true;
+        dragging = false;
+        onInput = (e.target === txt);
+        startX = e.clientX;
+        moved = false;
+        startY = e.clientY;
+        lastY = e.clientY;
+        startF = toFrac(clamp(V[key], p.min, p.max), p);
+        accF = startF;
+        if (!onInput) {
+            el.setPointerCapture(e.pointerId);
+            e.preventDefault();
+        }
+    });
+
+    el.addEventListener('pointermove', e => {
+        if (!active) return;
+        if (onInput) {
+            if (Math.abs(e.clientX - startX) > 3 || Math.abs(e.clientY - startY) > 3) moved = true;
+            return;
+        }
+        const dy = startY - e.clientY;
+        if (!dragging) {
+            if (Math.abs(dy) < 3) return;
+            dragging = true;
+            dragOn[key] = true;
+            closeEditor(true);
+            Cabbage.sendControlData({ channel: key, value: V[key], gesture: 'begin' }, null);
+        }
+        e.preventDefault();
+        /* Shift 精调：按每帧增量累加（中途按 Shift 不会跳变） */
+        accF = clamp(accF + (lastY - e.clientY) / (e.shiftKey ? 750 : 150), 0, 1);
+        lastY = e.clientY;
+        let v = fromFrac(accF, p);
+        v = clamp(Math.round(v / p.step) * p.step, p.min, p.max);
+        setParam(key, v);
+        paintKnob(key);
+        Cabbage.sendControlData({ channel: key, value: v, gesture: 'value' }, null);
+    });
+
+    const up = e => {
+        if (!active) return;
+        active = false;
+        const wasInput = onInput;
+        const wasMoved = moved;
+        onInput = false;
+        moved = false;
+        try { el.releasePointerCapture(e.pointerId); } catch (_) {}
+        if (dragging) {
+            dragging = false;
+            dragOn[key] = false;
+            Cabbage.sendControlData({ channel: key, value: V[key], gesture: 'end' }, null);
+            return;
+        }
+        if (wasMoved) { lastTapAt = 0; lastTapKey = null; return; }
+
+        const now = performance.now();
+        if (lastTapKey === key && now - lastTapAt < DBL_MS) {
+            lastTapAt = 0; lastTapKey = null;
+            closeEditor();
+            resetKnob(key);
+            return;
+        }
+        lastTapAt = now; lastTapKey = key;
+        if (!wasInput) openEditor(key);
+    };
+    el.addEventListener('pointerup', up);
+    el.addEventListener('pointercancel', up);
+    el.addEventListener('contextmenu', e => e.preventDefault());
+
+    txt.addEventListener('keydown', e => {
+        e.stopPropagation();
+        if (e.key === 'Enter') { e.preventDefault(); commitEdit(); }
+        else if (e.key === 'Escape') { e.preventDefault(); closeEditor(); paintKnob(key); }
+    });
+    txt.addEventListener('blur', () => { if (editing.key === key) commitEdit(); });
+    txt.addEventListener('dblclick', e => {
+        e.preventDefault(); e.stopPropagation();
+        closeEditor();
+        resetKnob(key);
+    });
+}
+
+/* ---------------- 湿声发送 ---------------- */
+function paintWet() {
+    const w = $('dual').clientWidth;
+    const l = minWet * w, r = maxWet * w;
+    $('wetRange').style.left = l + 'px';
+    $('wetRange').style.width = Math.max(0, r - l) + 'px';
+    $('thumbMin').style.left = l + 'px';
+    $('thumbMax').style.left = r + 'px';
+    paintWetOut();
+}
+
+const wetEditing = { key: null };
+function paintWetOut() {
+    if (wetEditing.key !== 'minWet') $('wetMinOut').value = minWet.toFixed(2);
+    if (wetEditing.key !== 'maxWet') $('wetMaxOut').value = maxWet.toFixed(2);
+}
+
+function bindWetField(id, key) {
+    const el = $(id);
+    const p = { min: 0, max: 1, step: 0.01 };
+
+    const commit = () => {
+        if (wetEditing.key !== key) return;
+        wetEditing.key = null;
+        const v = parseNum(el.value, p);
+        if (!isFinite(v)) { paintWetOut(); return; }
+        if (key === 'minWet') minWet = clamp(v, 0, Math.max(0, maxWet - 0.02));
+        else maxWet = clamp(v, Math.min(1, minWet + 0.02), 1);
+        paintWet();
+        Cabbage.sendControlData({ channel: key, value: key === 'minWet' ? minWet : maxWet, gesture: 'complete' }, null);
+    };
+
+    el.addEventListener('focus', () => { wetEditing.key = key; el.select(); });
+    el.addEventListener('keydown', e => {
+        e.stopPropagation();
+        if (e.key === 'Enter') { e.preventDefault(); commit(); el.blur(); }
+        else if (e.key === 'Escape') { e.preventDefault(); wetEditing.key = null; paintWetOut(); el.blur(); }
+    });
+    el.addEventListener('blur', commit);
+    el.addEventListener('pointerdown', e => e.stopPropagation());
+    el.addEventListener('dblclick', e => {
+        e.preventDefault();
+        wetEditing.key = null;
+        if (key === 'minWet') minWet = WET_DEF.minWet;
+        else maxWet = WET_DEF.maxWet;
+        paintWet();
+        el.blur();
+        Cabbage.sendControlData({ channel: key, value: key === 'minWet' ? minWet : maxWet, gesture: 'complete' }, null);
+    });
+}
+
+const wetFrom = e => {
+    const box = $('dual').getBoundingClientRect();
+    const f = clamp((e.clientX - box.left) / box.width, 0, 1);
+    if (dragOn.wet === 'min') minWet = Math.min(f, maxWet - 0.02);
+    else maxWet = Math.max(f, minWet + 0.02);
+    paintWet();
+    return dragOn.wet === 'min' ? minWet : maxWet;
+};
+
+function bindThumb(id, which) {
+    const el = $(id);
+    const ch = which === 'min' ? 'minWet' : 'maxWet';
+    el.addEventListener('pointerdown', e => {
+        if (editing.key) commitEdit();
+        dragOn.wet = which;
+        el.setPointerCapture(e.pointerId);
+        e.preventDefault();
+        Cabbage.sendControlData({ channel: ch, value: wetFrom(e), gesture: 'begin' }, null);
+    });
+    el.addEventListener('pointermove', e => {
+        if (dragOn.wet !== which) return;
+        Cabbage.sendControlData({ channel: ch, value: wetFrom(e), gesture: 'value' }, null);
+    });
+    const up = () => {
+        if (dragOn.wet !== which) return;
+        dragOn.wet = null;
+        Cabbage.sendControlData({ channel: ch, value: which === 'min' ? minWet : maxWet, gesture: 'end' }, null);
+    };
+    el.addEventListener('pointerup', up);
+    el.addEventListener('pointercancel', up);
+}
+
+/* ---------------- 电平表 ---------------- */
+const METER_H = 148;
+const DB_MIN = -60;
+const DB_TICKS = [0, -6, -12, -18, -24, -30, -40, -50, -60];
+
+const ampToDb = a => 20 * Math.log10(Math.max(Math.abs(a), 1e-6));
+const dbToPos = db => clamp((db - DB_MIN) / (0 - DB_MIN), 0, 1);
+
+function buildDbScales() {
+    for (const id of ['scaleL', 'scaleR']) {
+        const el = $(id);
+        el.innerHTML = '';
+        for (const db of DB_TICKS) {
+            const t = document.createElement('div');
+            t.className = 't' + (db === 0 ? ' zero' : '') + (db % 12 === 0 ? ' major' : '');
+            t.style.bottom = (dbToPos(db) * 100).toFixed(3) + '%';
+            const n = document.createElement('span');
+            n.className = 'n';
+            n.textContent = db === 0 ? '0' : String(db);
+            t.appendChild(n);
+            el.appendChild(t);
+        }
+    }
+}
+
+function setMeter(id, capId, amp) {
+    const db = clamp(ampToDb(amp), DB_MIN, 0);
+    const pos = dbToPos(db);
+    $(id).style.transform = 'scaleY(' + pos.toFixed(4) + ')';
+    const cap = $(capId);
+    cap.style.transform = 'translateY(' + (-pos * METER_H).toFixed(1) + 'px)';
+    cap.style.opacity = pos > 0.002 ? '.95' : '0';
+}
+
+function updateGlow(l, r) {
+    const lv = clamp(Math.max(l, r), 0, 1);
+    document.documentElement.style.setProperty('--lvl', lv.toFixed(3));
+    $('lvlWash').setAttribute('opacity', (0.05 + lv * 0.55).toFixed(3));
+}
+
+/* ---------------- 接收后端 ---------------- */
+let lvlL = 0, lvlR = 0;
+
+function applyValue(id, v) {
+    if (typeof v !== 'number' || isNaN(v)) return;
+    switch (id) {
+        case 'loom_x':
+            queueMarker(v, null);
+            break;
+        case 'loom_y':
+            queueMarker(null, v);
+            break;
+        case 'rows':
+            if (dragOn.rows) break;
+            V.rows = clamp(Math.round(v), P.rows.min, P.rows.max);
+            paintKnob('rows'); rebuildGrid();
+            break;
+        case 'cols':
+            if (dragOn.cols) break;
+            V.cols = clamp(Math.round(v), P.cols.min, P.cols.max);
+            paintKnob('cols'); rebuildGrid();
+            break;
+        case 'path':
+            if (dragOn.path) break;
+            V.path = clamp(Math.round(v), P.path.min, P.path.max);
+            paintKnob('path'); rebuildGrid();
+            break;
+        case 'speed':
+            if (dragOn.speed) break;
+            V.speed = clamp(v, P.speed.min, P.speed.max);
+            paintKnob('speed');
+            break;
+        case 'glide':
+            if (dragOn.glide) break;
+            V.glide = clamp(v, P.glide.min, P.glide.max);
+            paintKnob('glide');
+            break;
+        case 'texture':
+            if (dragOn.texture) break;
+            V.texture = clamp(v, P.texture.min, P.texture.max);
+            paintKnob('texture'); paintTexture();
+            break;
+        case 'warp':
+            if (dragOn.warp) break;
+            V.warp = clamp(v, P.warp.min, P.warp.max);
+            paintKnob('warp');
+            break;
+        case 'minWet':
+            if (dragOn.wet === 'min') break;
+            minWet = clamp(v, 0, 1);
+            paintWet();
+            break;
+        case 'maxWet':
+            if (dragOn.wet === 'max') break;
+            maxWet = clamp(v, 0, 1);
+            paintWet();
+            break;
+        case 'roomSize':
+            if (dragOn.roomSize) break;
+            V.roomSize = clamp(v, P.roomSize.min, P.roomSize.max);
+            paintKnob('roomSize');
+            break;
+        case 'cutoff':
+            if (dragOn.cutoff) break;
+            V.cutoff = clamp(v, P.cutoff.min, P.cutoff.max);
+            paintKnob('cutoff');
+            break;
+        case 'masterGain':
+            if (dragOn.masterGain) break;
+            V.masterGain = clamp(v, P.masterGain.min, P.masterGain.max);
+            paintKnob('masterGain');
+            break;
+        case 'outL':
+            lvlL = v;
+            setMeter('mtrL', 'capL', v);
+            updateGlow(lvlL, lvlR);
+            break;
+        case 'outR':
+            lvlR = v;
+            setMeter('mtrR', 'capR', v);
+            updateGlow(lvlL, lvlR);
+            break;
+    }
+}
+
+Cabbage.addMessageListener(msg => {
+    const data = msg.data ?? msg;
+    if (msg.command === 'widgetUpdate') {
+        const id = data.id ?? data.channel;
+        const v = data.value !== undefined ? data.value : Cabbage.extractValue(data, id);
+        applyValue(id, v);
+    } else if (msg.command === 'batchWidgetUpdate') {
+        for (const w of msg.widgets ?? []) {
+            const e = w.data ?? w;
+            applyValue(e.id, Cabbage.extractValue(e, e.id));
+        }
+    } else if (msg.command === 'resizeResponse') {
+        if (hostResize !== 'accepted') {
+            const d = msg.data ?? msg;
+            hostResize = d.accepted ? 'accepted' : 'rejected';
+            if (hostResize === 'accepted') { reqViewport = 0; clearTimeout(reqTimer); }
+            paintZoomBadge();
+        }
+    } else if (msg.command === 'parameterChange') {
+        const pm = msg.data ?? msg;
+        const id = typeof pm.channel === 'string' ? pm.channel : PARAM_IDX[pm.paramIdx];
+        if (id) applyValue(id, pm.value);
+    }
+});
+
+/* ---------------- 窗口缩放（§6.3 / §6.6 / §6.7） ---------------- */
+const CANVAS = { w: 620, h: 700 };
+const BASE = 1;
+const MIN_SCALE = 0.75 * BASE;
+
+const MAX_FILL = 0.94;
+const screenW = () => (screen.availWidth || screen.width || 0);
+const screenH = () => (screen.availHeight || screen.height || 0);
+
+function maxScale() {
+    const sw = screenW(), sh = screenH();
+    const byW = sw ? sw / CANVAS.w : 3;
+    const byH = sh ? sh / CANVAS.h : 3;
+    return Math.max(MIN_SCALE, Math.min(12, Math.min(byW, byH) * MAX_FILL));
+}
+
+const clampScale = s => Math.min(maxScale(), Math.max(MIN_SCALE, s));
+const viewScale = () => Math.min(innerWidth / CANVAS.w, innerHeight / CANVAS.h);
+
+let hostResize = 'unknown';
+let reqViewport = 0;
+let reqTimer = 0;
+
+let zoomDrag = null;
+let holdScale = null;
+
+const yOf = e => (typeof e.screenY === 'number' && e.screenY !== 0) ? e.screenY : e.clientY;
+let pendingScale = null;
+let rafId = 0;
+let lastSent = 0;
+let dragEndedAt = 0;
+
+function paintZoomBadge(override) {
+    const s = override != null ? override : viewScale() / BASE;
+    document.body.style.setProperty('--zoom', (s * BASE).toFixed(4));
+    $('zpct').textContent = Math.round(s * 100) + '%';
+    $('zoomer').dataset.host = hostResize;
+}
+
+function fitToViewport() {
+    if (reqViewport && (innerWidth !== reqViewport.w || innerHeight !== reqViewport.h)) {
+        reqViewport = 0;
+        clearTimeout(reqTimer);
+        hostResize = 'accepted';
+    }
+    if (holdScale != null && Math.abs(viewScale() / BASE - holdScale) < 0.01) holdScale = null;
+    paintZoomBadge(zoomDrag && zoomDrag.moved ? zoomDrag.target : (holdScale ?? undefined));
+}
+
+function requestWindowScale(scale) {
+    let w = Math.round(CANVAS.w * scale * BASE);
+    let h = Math.round(CANVAS.h * scale * BASE);
+    const limit = Math.floor(screenH() * MAX_FILL);
+    if (limit > 0 && h > limit) {
+        h = limit;
+        w = Math.round(h * CANVAS.w / CANVAS.h);
+    }
+    reqViewport = { w: innerWidth, h: innerHeight };
+    clearTimeout(reqTimer);
+    reqTimer = setTimeout(() => {
+        if (reqViewport) { reqViewport = 0; hostResize = 'rejected'; holdScale = null; paintZoomBadge(); }
+    }, 600);
+    Cabbage.requestResize(w, h, null);
+}
+
+function scheduleResizeRequest() {
+    if (rafId) return;
+    rafId = requestAnimationFrame(() => {
+        rafId = 0;
+        if (pendingScale == null) return;
+        if (lastSent && Math.abs(pendingScale - lastSent) < 0.004) return;
+        lastSent = pendingScale;
+        requestWindowScale(lastSent);
+    });
+}
+
+$('zoomer').addEventListener('pointerdown', e => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    $('zoomer').setPointerCapture(e.pointerId);
+    const s = viewScale() / BASE;
+    zoomDrag = {
+        anchorY: yOf(e), startScale: s, moved: false, target: s,
+        ceiling: Math.max(s, maxScale())
+    };
+    dragOn.zoom = true;
+    document.body.classList.add('dragging-zoom');
+});
+
+$('zoomer').addEventListener('pointermove', e => {
+    if (!zoomDrag) return;
+    const dy = yOf(e) - zoomDrag.anchorY;
+    if (!zoomDrag.moved && Math.abs(dy) < 2) return;
+    zoomDrag.moved = true;
+    e.preventDefault();
+    /* 往下 = 把窗口右下角拉出去 = 变大 */
+    const raw = zoomDrag.startScale * Math.exp(dy / 220);
+    const target = Math.min(zoomDrag.ceiling, Math.max(MIN_SCALE, raw));
+    zoomDrag.target = target;
+    pendingScale = target;
+    paintZoomBadge(target);
+    scheduleResizeRequest();
+});
+
+function endZoomDrag(e) {
+    if (!zoomDrag) return;
+    const moved = zoomDrag.moved;
+    const finalScale = zoomDrag.target;
+    zoomDrag = null;
+    pendingScale = null;
+    dragOn.zoom = false;
+    document.body.classList.remove('dragging-zoom');
+    if (rafId) { cancelAnimationFrame(rafId); rafId = 0; }
+    try { $('zoomer').releasePointerCapture(e.pointerId); } catch (_) {}
+    if (moved) {
+        dragEndedAt = performance.now();
+        if (Math.abs(finalScale - lastSent) >= 0.004) {
+            lastSent = finalScale;
+            requestWindowScale(finalScale);
+        }
+        holdScale = finalScale;
+        paintZoomBadge(finalScale);
+        return;
+    }
+    paintZoomBadge();
+}
+$('zoomer').addEventListener('pointerup', endZoomDrag);
+$('zoomer').addEventListener('pointercancel', endZoomDrag);
+
+$('zoomer').addEventListener('dblclick', e => {
+    e.preventDefault();
+    if (performance.now() - dragEndedAt < 400) return;
+    lastSent = BASE;
+    holdScale = BASE;
+    requestWindowScale(BASE);
+    paintZoomBadge(BASE);
+});
+
+function initZoom() {
+    paintZoomBadge();
+    lastSent = viewScale() / BASE;
+    new ResizeObserver(fitToViewport).observe(document.documentElement);
+    addEventListener('resize', fitToViewport);
+}
+
+initZoom();
+
+/* ---------------- 启动 ---------------- */
+for (const g of ['tRows', 'tCols', 'tPath', 'tSpeed', 'tGlide', 'tTexture', 'tWarp', 'tRoom', 'tDamp', 'tGain']) {
+    buildTicks(g);
+}
+for (const g of ['gRows', 'gCols', 'gPath', 'gSpeed', 'gGlide', 'gTexture', 'gWarp', 'gRoom', 'gDamp', 'gGain']) {
+    $(g).setAttribute('stroke-dasharray', SPAN.toFixed(2) + ' ' + CIRC.toFixed(2));
+}
+
+bindKnob('kRows', 'rows');
+bindKnob('kCols', 'cols');
+bindKnob('kPath', 'path');
+bindKnob('kSpeed', 'speed');
+bindKnob('kGlide', 'glide');
+bindKnob('kTexture', 'texture');
+bindKnob('kWarp', 'warp');
+bindKnob('kRoom', 'roomSize');
+bindKnob('kDamp', 'cutoff');
+bindKnob('kGain', 'masterGain');
+
+bindThumb('thumbMin', 'min');
+bindThumb('thumbMax', 'max');
+bindWetField('wetMinOut', 'minWet');
+bindWetField('wetMaxOut', 'maxWet');
+
+rebuildGrid();
+paintWet();
+
+for (const key of Object.keys(P)) paintKnob(key);
+
+buildDbScales();
+setMeter('mtrL', 'capL', 0);
+setMeter('mtrR', 'capR', 0);
+updateGlow(0, 0);
+
+/* 拖动期间禁止原生选中/拖影；输入框必须放行 */
+for (const ev of ['selectstart', 'dragstart']) {
+    document.addEventListener(ev, e => {
+        if (e.target && e.target.closest && e.target.closest('input')) return;
+        if (Object.values(dragOn).some(Boolean)) e.preventDefault();
+    });
+}
+
+Cabbage.sendCustomCommand('cabbageIsReadyToLoad', null);
+/* ===== 圆盘模型（双耳声场是圆盘，方形四角在盘外）=====
+   画盘边 + 盘外斜纹；声场是半径 PAD.w/2 的圆，织机落在它的内接正方形里。 */
+(function markDisc() {
+    const svg = document.querySelector('#scene');
+    if (!svg) return;
+    const NS = 'http://www.w3.org/2000/svg';
+    const CXv = 310, CYv = 223, R = 165;
+    let defs = svg.querySelector('defs');
+    if (!defs) {
+        defs = document.createElementNS(NS, 'defs');
+        svg.insertBefore(defs, svg.firstChild);
+    }
+    if (!svg.querySelector('#hatch')) {
+        const pat = document.createElementNS(NS, 'pattern');
+        pat.setAttribute('id', 'hatch');
+        pat.setAttribute('width', '7');
+        pat.setAttribute('height', '7');
+        pat.setAttribute('patternUnits', 'userSpaceOnUse');
+        pat.setAttribute('patternTransform', 'rotate(45)');
+        const ln = document.createElementNS(NS, 'line');
+        ln.setAttribute('x1', '0'); ln.setAttribute('y1', '0');
+        ln.setAttribute('x2', '0'); ln.setAttribute('y2', '7');
+        ln.setAttribute('stroke', 'rgba(255,255,255,.085)');
+        ln.setAttribute('stroke-width', '1');
+        pat.appendChild(ln);
+        defs.appendChild(pat);
+    }
+    const g = document.createElementNS(NS, 'g');
+    const dead = document.createElementNS(NS, 'path');
+    dead.setAttribute('fill', 'url(#hatch)');
+    dead.setAttribute('fill-rule', 'evenodd');
+    dead.setAttribute('d',
+        'M' + (CXv - R) + ' ' + (CYv - R) + 'H' + (CXv + R) +
+        'V' + (CYv + R) + 'H' + (CXv - R) + 'Z ' +
+        'M' + (CXv - R) + ' ' + CYv + 'A' + R + ' ' + R + ' 0 1 0 ' +
+        (CXv + R) + ' ' + CYv + 'A' + R + ' ' + R + ' 0 1 0 ' +
+        (CXv - R) + ' ' + CYv + 'Z');
+    const disc = document.createElementNS(NS, 'circle');
+    disc.setAttribute('cx', CXv);
+    disc.setAttribute('cy', CYv);
+    disc.setAttribute('r', R);
+    disc.setAttribute('fill', 'none');
+    disc.setAttribute('stroke', 'rgba(255,255,255,.30)');
+    disc.setAttribute('stroke-width', '1');
+    g.appendChild(dead);
+    g.appendChild(disc);
+    /* 插入到 pad 底板之后，否则会被 .padfill 盖住 */
+    const fill = svg.querySelector('.padfill');
+    if (fill && fill.nextSibling) svg.insertBefore(g, fill.nextSibling);
+    else if (fill) svg.appendChild(g);
+    else svg.insertBefore(g, defs.nextSibling);
+})();
+/* ---------------- 内置使用手册 ----------------
+   顶栏 ? 在 iframe 里打开 help.html。只用内嵌：WebView 里 window.open 是死按钮。 */
+import('./help-ui.js').then(({ attachHelp }) => attachHelp())
+    .catch(e => console.warn('Cabbage: 手册模块不可用 —', e));
+</script>
+</body>
+</html>

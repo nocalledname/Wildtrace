@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Cab3-Quad-Stasis · 使用手册</title>
+<style>:root {
+    --fg: #f3f3f3;
+    --dim: rgba(255, 255, 255, .70);
+    --faint: rgba(255, 255, 255, .42);
+    --hair: rgba(255, 255, 255, .12);
+    --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body {
+    background: #000;
+    color: var(--fg);
+    font-family: -apple-system, "Helvetica Neue", "PingFang SC", Arial, sans-serif;
+    font-size: 11px;
+    line-height: 1.68;
+    -webkit-font-smoothing: antialiased;
+}
+body { padding: 16px 14px 38px; max-width: 760px; margin: 0 auto; }
+::-webkit-scrollbar { width: 4px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, .16); border-radius: 2px; }
+::-webkit-scrollbar-thumb:hover { background: rgba(255, 255, 255, .32); }
+
+h1 {
+    font-size: 13px;
+    font-weight: 500;
+    letter-spacing: .26em;
+    text-transform: uppercase;
+}
+.sub {
+    margin-top: 4px;
+    font-family: var(--mono);
+    font-size: 8.5px;
+    letter-spacing: .16em;
+    text-transform: uppercase;
+    color: var(--faint);
+}
+h2 {
+    margin: 20px 0 6px;
+    font-size: 9px;
+    font-weight: 500;
+    letter-spacing: .22em;
+    text-transform: uppercase;
+    color: rgba(255, 255, 255, .55);
+    padding-bottom: 4px;
+    border-bottom: 1px solid var(--hair);
+}
+h3 {
+    margin: 13px 0 2px;
+    font-family: var(--mono);
+    font-size: 8.5px;
+    font-weight: 500;
+    letter-spacing: .16em;
+    text-transform: uppercase;
+    color: rgba(255, 255, 255, .38);
+}
+h3:first-of-type { margin-top: 6px; }
+
+ul { padding-left: 15px; }
+li { color: var(--dim); margin: 1px 0; }
+li b { color: #fff; font-weight: 500; }
+
+table { width: 100%; border-collapse: collapse; }
+td {
+    padding: 3px 0;
+    vertical-align: top;
+    color: var(--dim);
+    font-size: 10.5px;
+}
+td:first-child {
+    width: 96px;
+    padding-right: 10px;
+    font-family: var(--mono);
+    font-size: 8.5px;
+    letter-spacing: .04em;
+    color: rgba(255, 255, 255, .88);
+    white-space: nowrap;
+}
+
+.k { padding: 7px 0 8px; border-bottom: 1px solid rgba(255, 255, 255, .065); }
+.k:last-child { border-bottom: 0; }
+.k .head { display: flex; align-items: baseline; gap: 8px; }
+.k .name { font-size: 10.5px; font-weight: 600; letter-spacing: .01em; }
+.k .ch {
+    font-family: var(--mono);
+    font-size: 8.5px;
+    letter-spacing: .02em;
+    color: rgba(255, 255, 255, .34);
+}
+.k .range {
+    margin-left: auto;
+    font-family: var(--mono);
+    font-size: 8.5px;
+    letter-spacing: .02em;
+    color: rgba(255, 255, 255, .44);
+    text-align: right;
+    white-space: nowrap;
+}
+.k .desc { margin-top: 2px; color: var(--dim); font-size: 10.5px; line-height: 1.62; }
+.k .desc code {
+    font-family: var(--mono);
+    font-size: 9.5px;
+    color: rgba(255, 255, 255, .90);
+}
+
+.note {
+    margin-top: 8px;
+    padding: 8px 10px;
+    border-left: 2px solid rgba(255, 255, 255, .20);
+    background: rgba(255, 255, 255, .035);
+    color: rgba(255, 255, 255, .68);
+    font-size: 10px;
+    line-height: 1.66;
+}
+.note b { color: #fff; font-weight: 600; }</style>
+</head>
+<body>
+<h1>STASIS</h1>
+<div class="sub">Quad Doppler · Cab3-Quad-Stasis</div>
+<h2>快速上手</h2>
+<table>
+<tr><td>拖中心点</td><td>拖动中央区域移动声源 / 场域中心。松手后保持位置。</td></tr>
+<tr><td>双击中心</td><td>回到 <code>0.5 / 0.5</code>。</td></tr>
+<tr><td>数值框</td><td>点击进入编辑，<code>Enter</code> 提交、<code>Esc</code> 取消。双击数值框回默认值。</td></tr>
+<tr><td>旋钮 / 推子</td><td>旋钮上下拖；横向推子左右拖、纵向推子上下拖。按住 <code>Shift</code> 精调。双击回默认值。</td></tr>
+<tr><td>Wet Send</td><td>两个滑柄分别拖混响发送的下限 / 上限，不能交叉。</td></tr>
+<tr><td>右下角三角</td><td>拖动改窗口大小，双击回到 100%。</td></tr>
+<tr><td>顶栏 CAMERA</td><td>手势开关（<code>camera-off</code> / <code>camera-left</code> / <code>camera-right</code>）。</td></tr>
+<tr><td>顶栏 ?</td><td>打开本手册。</td></tr>
+</table>
+
+<h2>旋钮与推子</h2>
+<h3>定位（四区雷达）</h3>
+<div class="k"><div class="head"><span class="name">X</span><span class="ch">x</span><span class="range">0 – 1 · 默认 0.500</span></div><div class="desc">左右。0 = 全左（FL + RL），1 = 全右（FR + RR）。等功率声像。</div></div>
+<div class="k"><div class="head"><span class="name">Y</span><span class="ch">y</span><span class="range">0 – 1 · 默认 0.500</span></div><div class="desc">前后。0 = 最后（RL + RR），1 = 最前（FL + FR）。与 X 组合成四角等功率分配。</div></div>
+<h3>空间</h3>
+<div class="k"><div class="head"><span class="name">Room Size</span><span class="ch">roomSize</span><span class="range">10 – 100 · 默认 50</span></div><div class="desc">空间尺寸。延迟基准 = <code>10 ms + 距离 × Room × 2</code>，混响反馈 = <code>0.15 + (Room−10)/90 × 0.77</code>（10 → 0.15，100 → 0.92）。越大越空旷、尾巴越长。</div></div>
+<div class="k"><div class="head"><span class="name">Damping</span><span class="ch">cutoff</span><span class="range">1000 – 16000 Hz · 默认 16000</span></div><div class="desc">混响高频吸收。越低越暗、尾巴越闷。</div></div>
+<h3>湿声</h3>
+<div class="k"><div class="head"><span class="name">Wet Send Min</span><span class="ch">minWet</span><span class="range">0 – 1 · 默认 0.10</span></div><div class="desc">最靠近中心时的混响发送量。</div></div>
+<div class="k"><div class="head"><span class="name">Wet Send Max</span><span class="ch">maxWet</span><span class="range">0 – 1 · 默认 0.60</span></div><div class="desc">最远离中心时的混响发送量，中间线性插值。<b>发送量还会再乘一次距离衰减</b>，所以远端混响跟着干声一起变小，不会越远越糊。</div></div>
+<h3>输出</h3>
+<div class="k"><div class="head"><span class="name">Master Gain</span><span class="ch">masterGain</span><span class="range">0 – 8 · 默认 2.00</span></div><div class="desc">总输出增益。<code>1.00</code> = 单位增益。默认 2.00 偏保守，优先保证不爆；需要更响就往上推。</div></div>
+
+
+<h2>手势控制</h2>
+<ul>
+<li>选 <b>camera-left</b> 只用<b>左手</b>，选 <b>camera-right</b> 只用<b>右手</b>；另一只手进画面不产生任何控制量。</li>
+<li>只取<b>食指指尖</b>。画面中央 60%（x / y 各 <code>20%~80%</code>）是工作区，外圈 20% 是活动冗余：指尖拖出去时钳制在边缘，参数停在最大 / 最小值，不会跳变。</li>
+<li>手往右 → X 变大；手往上 → Y 变大。</li>
+<li>选 <b>camera-off</b> 立即释放摄像头。切走插件界面也会自动释放，切回来自动恢复（无需重选）。</li>
+<li>手动拖中心点时手势自动让位，松手后手势接手；光标在数值框里编辑时同理。</li>
+<li>收不到摄像头或模型时下拉口会自动退回 <code>camera-off</code>，控制台给出 <code>手势启动失败</code>，界面其余部分照常工作。</li>
+</ul>
+<div class="note"><b>手势只驱动 <code>x / y</code>：</b>本插件不额外定义手势参数，顶栏 CAMERA 就是唯一开关；其余旋钮按键不受影响。</div>
+<div class="note"><b>Quad 渲染：</b>按 FL / FR / RL / RR 四路输出，X 决定左右、Y 决定前后，四角等功率分配。</div>
+
+<div class="note"><b>音量与混响的安全余量：</b>本插件的信号链内部留了 6 dB 余量（干声与混响发送各减半），末端还有一道软膝限幅（0.85 以下完全线性）。但把 <b>Master Gain</b> 推到很高、同时把 <b>Wet Send Max</b> 也拉满时，仍可能顶到限幅器的压缩区 —— 听感上是轻微的「滋滋」或发毛。遇到这种情况，先把 Master 退回 4–6，再用 Wet Send 补混响量，不要两边同时拉满。</div>
+</body>
+</html>
